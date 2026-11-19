@@ -1,0 +1,834 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Sudoku Uitleg</title>
+<style>
+:root {
+  --bg: #f6f4ef; --fg: #1d1d1f; --muted: #6b6b70; --card: #fff;
+  --line: #b9b6ae; --thick: #1d1d1f;
+  --given: #111; --found: #1f5fbf; --new: #d0021b;
+  --house: #dcebff; --block: rgba(208, 2, 27, .16); --src: #f29d00;
+  --tgt: #ffd6d6; --tgtb: #d0021b; --sel: #fff2a8; --occ: #ecebe7;
+  --pat: #1b8a3a; --primary: #1f5fbf;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17181a; --fg: #ececec; --muted: #9a9aa0; --card: #222326;
+    --line: #4a4b50; --thick: #d8d8d8;
+    --given: #f2f2f2; --found: #79a8ff; --new: #ff5b6b;
+    --house: #1e3350; --block: rgba(255, 91, 107, .22); --tgt: #5a1f26;
+    --sel: #5a5320; --occ: #2c2d31; --pat: #4cd07a; --primary: #4f8ef7;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg);
+  font: 16px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+main { max-width: 520px; margin: 0 auto; padding: 12px 16px 40px; }
+header h1 { margin: 4px 0 0; font-size: 1.4rem; }
+.sub { margin: 2px 0 10px; color: var(--muted); font-size: .92rem; }
+
+/* rooster */
+.grid { display: grid; grid-template-columns: repeat(9, 1fr); grid-template-rows: repeat(9, 1fr);
+  width: 100%; aspect-ratio: 1; border: 3px solid var(--thick); background: var(--card);
+  user-select: none; touch-action: manipulation; }
+.cell { position: relative; display: flex; align-items: center; justify-content: center;
+  border-right: 1px solid var(--line); border-bottom: 1px solid var(--line);
+  font-size: clamp(16px, 6vw, 28px); font-weight: 500; cursor: pointer; min-width: 0; min-height: 0; }
+.cell.br { border-right: 3px solid var(--thick); }
+.cell.bb { border-bottom: 3px solid var(--thick); }
+.cell.c9 { border-right: 0; } .cell.r9 { border-bottom: 0; }
+.cell.given { color: var(--given); font-weight: 700; }
+.cell.found { color: var(--found); }
+.cell.sel { background: var(--sel); }
+.cell.bad { background: var(--tgt); color: var(--new); }
+
+/* markeringen */
+.cell.house { background-color: var(--house); }
+.cell.occ { background-color: var(--occ); }
+.cell.blocked { background-image: repeating-linear-gradient(45deg, var(--block) 0 4px, transparent 4px 9px); }
+.cell.src .v { outline: 3px solid var(--src); border-radius: 50%; padding: 0 .28em; }
+.cell.ex::after { content: '\00d7'; position: absolute; inset: 0; display: flex; align-items: center;
+  justify-content: center; color: var(--new); font-size: 1.5em; font-weight: 300; opacity: .8; }
+.cell.tgt { background-color: var(--tgt); box-shadow: inset 0 0 0 3px var(--tgtb); }
+.cell.tgt .v { color: var(--new); font-weight: 800; }
+.cell.q .v { color: var(--new); opacity: .7; }
+
+/* kandidaten */
+.cands { position: absolute; inset: 1px; display: grid; grid-template-columns: repeat(3, 1fr);
+  font-size: clamp(7px, 2.2vw, 11px); line-height: 1; color: var(--muted); font-weight: 500; }
+.cands span { display: flex; align-items: center; justify-content: center; }
+.cands .pat { color: var(--pat); font-weight: 800; }
+.cands .el { color: var(--new); font-weight: 800; text-decoration: line-through; }
+.cands .gone { visibility: hidden; }
+.cands .focus { color: var(--fg); font-weight: 700; }
+
+/* knoppen */
+button { font: inherit; border-radius: 10px; border: 1px solid var(--line); background: var(--card);
+  color: var(--fg); padding: 10px 14px; cursor: pointer; }
+button:disabled { opacity: .4; cursor: default; }
+button.primary { background: var(--primary); border-color: var(--primary); color: #fff; font-weight: 600; }
+button.ghost { background: transparent; }
+button.big { width: 100%; padding: 14px; font-size: 1.05rem; margin-top: 8px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+.pad { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-top: 12px; }
+.pad button { padding: 12px 0; font-size: 1.15rem; font-weight: 600; }
+.msg { min-height: 1.2em; margin: 8px 0 0; font-size: .92rem; }
+.msg.err { color: var(--new); } .msg.ok { color: var(--pat); }
+details { margin-top: 10px; font-size: .92rem; }
+textarea { width: 100%; font: 14px monospace; background: var(--card); color: var(--fg);
+  border: 1px solid var(--line); border-radius: 8px; padding: 6px; }
+.small { color: var(--muted); margin: 4px 0; }
+
+/* uitleg */
+.nav { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 12px; }
+.nav button { flex: 0 0 auto; }
+#counter { color: var(--muted); font-size: .9rem; text-align: center; }
+.card { background: var(--card); border-radius: 12px; padding: 12px 14px; margin-top: 10px;
+  border: 1px solid var(--line); }
+.tech { font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.card h2 { font-size: 1.1rem; margin: 2px 0 6px; }
+.card ol { margin: 0; padding-left: 20px; }
+.card li { margin: 3px 0; }
+.card li.final { font-weight: 700; color: var(--new); }
+.hint { margin: 8px 0 0; color: var(--muted); font-size: .88rem; }
+.toggle { display: flex; align-items: center; gap: 6px; font-size: .92rem; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 12px; font-size: .82rem; color: var(--muted); }
+.legend span { display: flex; align-items: center; gap: 5px; }
+.lg { display: inline-flex; width: 18px; height: 18px; border: 1px solid var(--line); align-items: center;
+  justify-content: center; font-style: normal; font-size: 12px; background: var(--card); }
+.lg.house { background: var(--house); }
+.lg.blocked { background-image: repeating-linear-gradient(45deg, var(--block) 0 3px, transparent 3px 6px); }
+.lg.src { border-radius: 50%; border: 2px solid var(--src); color: var(--fg); }
+.lg.ex { color: var(--new); }
+.lg.tgt { background: var(--tgt); border: 2px solid var(--tgtb); }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Sudoku Uitleg</h1>
+    <p id="modeInfo" class="sub">Vul de begincijfers in. Daarna leg ik stap voor stap uit.</p>
+  </header>
+
+  <div id="grid" class="grid" aria-label="Sudoku rooster"></div>
+
+  <!-- INVOER -->
+  <section id="inputPanel">
+    <div id="pad" class="pad"></div>
+    <div class="row">
+      <button id="btnExample" class="ghost">Voorbeeld (krant)</button>
+      <button id="btnClear" class="ghost">Leeg maken</button>
+    </div>
+    <details>
+      <summary>Plakken als tekst</summary>
+      <p class="small">81 tekens, rij voor rij. Leeg = 0 of punt.</p>
+      <textarea id="txt" rows="3" spellcheck="false"></textarea>
+      <button id="btnLoadTxt" class="ghost">Laden</button>
+    </details>
+    <p id="msg" class="msg"></p>
+    <button id="btnStart" class="primary big">Start uitleg</button>
+  </section>
+
+  <!-- UITLEG -->
+  <section id="explainPanel" hidden>
+    <div class="nav">
+      <button id="btnPrev">&larr; Vorige</button>
+      <span id="counter"></span>
+      <button id="btnNext" class="primary">Volgende &rarr;</button>
+    </div>
+    <div id="card" class="card">
+      <div id="tech" class="tech"></div>
+      <h2 id="title"></h2>
+      <ol id="lines"></ol>
+      <p id="phaseHint" class="hint"></p>
+    </div>
+    <div class="row">
+      <button id="btnRestart" class="ghost">Begin opnieuw</button>
+      <label class="toggle"><input type="checkbox" id="chkCands"> Kandidaten</label>
+      <button id="btnEdit" class="ghost">Invoer wijzigen</button>
+    </div>
+    <div class="legend">
+      <span><i class="lg house"></i>zoekgebied</span>
+      <span><i class="lg blocked"></i>geblokkeerd</span>
+      <span><i class="lg src">6</i>oorzaak</span>
+      <span><i class="lg ex">&times;</i>valt af</span>
+      <span><i class="lg tgt"></i>enige plek</span>
+    </div>
+  </section>
+</main>
+<script>
+/* Sudoku Uitleg: logische stap-voor-stap oplosser.
+   Werkt in browser (window.SudokuSolver) en Node (module.exports). */
+(function (root) {
+  'use strict';
+
+  // ---------- basis ----------
+  const ROW = i => Math.floor(i / 9);
+  const COL = i => i % 9;
+  const BOX = i => Math.floor(ROW(i) / 3) * 3 + Math.floor(COL(i) / 3);
+  const name = i => 'R' + (ROW(i) + 1) + 'C' + (COL(i) + 1);
+  const BIT = d => 1 << d;
+  const ALL = 0x3FE; // bits 1..9
+
+  // houses: 0-8 rijen, 9-17 kolommen, 18-26 blokken
+  const HOUSES = [];
+  for (let r = 0; r < 9; r++) HOUSES.push([...Array(9)].map((_, c) => r * 9 + c));
+  for (let c = 0; c < 9; c++) HOUSES.push([...Array(9)].map((_, r) => r * 9 + c));
+  for (let b = 0; b < 9; b++) {
+    const br = Math.floor(b / 3) * 3, bc = (b % 3) * 3, h = [];
+    for (let k = 0; k < 9; k++) h.push((br + Math.floor(k / 3)) * 9 + bc + (k % 3));
+    HOUSES.push(h);
+  }
+  const PEERS = [];
+  for (let i = 0; i < 81; i++) {
+    const s = new Set([...HOUSES[ROW(i)], ...HOUSES[9 + COL(i)], ...HOUSES[18 + BOX(i)]]);
+    s.delete(i);
+    PEERS.push([...s]);
+  }
+  const BOXNAMES = ['linksboven', 'middenboven', 'rechtsboven', 'middenlinks', 'midden',
+    'middenrechts', 'linksonder', 'middenonder', 'rechtsonder'];
+  const houseType = h => (h < 9 ? 'row' : h < 18 ? 'col' : 'box');
+  const houseName = h => h < 9 ? 'rij ' + (h + 1) : h < 18 ? 'kolom ' + (h - 8) : 'blok ' + BOXNAMES[h - 18];
+  const houseOf = (type, i) => type === 'row' ? ROW(i) : type === 'col' ? 9 + COL(i) : 18 + BOX(i);
+  const digitsOf = m => { const a = []; for (let d = 1; d <= 9; d++) if (m & BIT(d)) a.push(d); return a; };
+  const popcount = m => digitsOf(m).length;
+  const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+  const list = a => a.length <= 1 ? a.join('') : a.slice(0, -1).join(', ') + ' en ' + a[a.length - 1];
+
+  // ---------- controle ----------
+  function conflicts(grid) {
+    const bad = new Set();
+    for (const h of HOUSES) {
+      const seen = {};
+      for (const i of h) {
+        const v = grid[i];
+        if (!v) continue;
+        if (seen[v] !== undefined) { bad.add(i); bad.add(seen[v]); } else seen[v] = i;
+      }
+    }
+    return [...bad];
+  }
+
+  // Telt oplossingen (tot max). Alleen voor controle, nooit voor uitleg.
+  function countSolutions(grid, max = 2) {
+    const g = Array.from(grid);
+    let count = 0, solution = null;
+    function cand(i) {
+      let m = ALL;
+      for (const p of PEERS[i]) if (g[p]) m &= ~BIT(g[p]);
+      return m;
+    }
+    function rec() {
+      if (count >= max) return;
+      let best = -1, bm = 0, bc = 10;
+      for (let i = 0; i < 81; i++) if (!g[i]) {
+        const m = cand(i), n = popcount(m);
+        if (n < bc) { bc = n; best = i; bm = m; if (n === 0) return; }
+      }
+      if (best < 0) { count++; if (!solution) solution = g.slice(); return; }
+      for (const d of digitsOf(bm)) { g[best] = d; rec(); g[best] = 0; }
+    }
+    if (conflicts(g).length) return { count: 0, solution: null };
+    rec();
+    return { count, solution };
+  }
+
+  // ---------- state ----------
+  class State {
+    constructor(grid) {
+      this.grid = Array.from(grid);
+      this.elim = new Array(81).fill(0);        // weggestreepte kandidaten
+      this.elimStep = [...Array(81)].map(() => ({})); // [cel][cijfer] = stapnummer
+    }
+    clone() {
+      const s = new State(this.grid);
+      s.elim = this.elim.slice();
+      s.elimStep = this.elimStep.map(o => Object.assign({}, o));
+      return s;
+    }
+    seenMask(i) {
+      let m = 0;
+      for (const p of PEERS[i]) if (this.grid[p]) m |= BIT(this.grid[p]);
+      return m;
+    }
+    cands(i) { return this.grid[i] ? 0 : (ALL & ~this.seenMask(i) & ~this.elim[i]); }
+    allCands() { return [...Array(81)].map((_, i) => this.cands(i)); }
+  }
+
+  // Vind geplaatste cijfers d die cel i blokkeren, met de eenheid waardoor.
+  function blockersFor(state, i, d) {
+    const res = [];
+    for (const type of ['row', 'col', 'box']) {
+      const h = houseOf(type, i);
+      for (const p of HOUSES[h]) if (p !== i && state.grid[p] === d) res.push({ src: p, unit: h });
+    }
+    return res;
+  }
+
+  // ---------- techniek 1: verborgen enkele (enige plek voor cijfer in huis) ----------
+  function findHiddenSingles(state) {
+    const out = [];
+    for (let h = 0; h < 27; h++) {
+      const cells = HOUSES[h];
+      for (let d = 1; d <= 9; d++) {
+        if (cells.some(i => state.grid[i] === d)) continue;
+        const free = cells.filter(i => !state.grid[i] && (state.cands(i) & BIT(d)));
+        if (free.length !== 1) continue;
+        out.push(buildHiddenSingle(state, h, d, free[0]));
+      }
+    }
+    return out;
+  }
+
+  function buildHiddenSingle(state, h, d, target) {
+    const cells = HOUSES[h];
+    const occupied = cells.filter(i => state.grid[i]);
+    const emptyOthers = cells.filter(i => !state.grid[i] && i !== target);
+    // greedy: kies zo weinig mogelijk bron-cijfers
+    const opts = new Map();
+    const earlier = [];
+    for (const i of emptyOthers) {
+      const b = blockersFor(state, i, d).filter(x => x.unit !== h);
+      if (b.length) opts.set(i, b); else earlier.push(i);
+    }
+    const chosen = []; // {src, unit, cells:[]}
+    let rest = [...opts.keys()];
+    while (rest.length) {
+      const score = new Map();
+      for (const i of rest) for (const b of opts.get(i)) {
+        const k = b.src + ':' + b.unit;
+        if (!score.has(k)) score.set(k, { src: b.src, unit: b.unit, cells: [] });
+        score.get(k).cells.push(i);
+      }
+      let best = null;
+      for (const v of score.values()) if (!best || v.cells.length > best.cells.length) best = v;
+      chosen.push(best);
+      rest = rest.filter(i => !best.cells.includes(i));
+    }
+    chosen.sort((a, b) => a.unit - b.unit);
+    const blocked = new Set();
+    for (const c of chosen) for (const p of HOUSES[c.unit]) blocked.add(p);
+
+    const lines = [];
+    for (const c of chosen) {
+      lines.push('De ' + d + ' op ' + name(c.src) + ' blokkeert ' + houseName(c.unit) +
+        ': ' + list(c.cells.map(name)) + ' ' + (c.cells.length > 1 ? 'vallen' : 'valt') + ' af.');
+    }
+    for (const i of earlier) {
+      const st = state.elimStep[i][d];
+      lines.push(name(i) + ' viel af in stap ' + st + ' (kandidaat ' + d + ' weggestreept).');
+    }
+    if (occupied.length) {
+      lines.push('Al bezet: ' + list(occupied.map(i => name(i) + ' (' + state.grid[i] + ')')) + '.');
+    }
+    lines.push('Alleen ' + name(target) + ' blijft over, dus ' + name(target) + ' = ' + d + '.');
+
+    const t = houseType(h);
+    return {
+      type: 'hiddenSingle', technique: 'Enige plek in ' + (t === 'box' ? 'blok' : t === 'row' ? 'rij' : 'kolom'),
+      title: 'Zoek de ' + d + ' in ' + houseName(h),
+      digit: d, place: { cell: target, digit: d }, eliminations: [],
+      lines,
+      hl: {
+        house: cells.slice(), blocked: [...blocked], sources: chosen.map(c => c.src),
+        excluded: emptyOthers, occupied, target, digitFocus: d
+      },
+      score: (t === 'box' ? 0 : 10) + chosen.length * 2 + earlier.length * 5
+    };
+  }
+
+  // ---------- techniek 2: naakte enkele (cel met maar 1 kandidaat) ----------
+  function findNakedSingles(state) {
+    const out = [];
+    for (let i = 0; i < 81; i++) {
+      if (state.grid[i]) continue;
+      const m = state.cands(i);
+      if (popcount(m) !== 1) continue;
+      const d = digitsOf(m)[0];
+      const per = { row: [], col: [], box: [] };
+      const src = [];
+      const used = new Set();
+      for (const type of ['row', 'col', 'box']) {
+        for (const p of HOUSES[houseOf(type, i)]) {
+          const v = state.grid[p];
+          if (v && !used.has(v)) { used.add(v); per[type].push(v); src.push(p); }
+        }
+      }
+      const lines = [];
+      if (per.row.length) lines.push('Rij ' + (ROW(i) + 1) + ' heeft al: ' + list(per.row.sort()) + '.');
+      if (per.col.length) lines.push('Kolom ' + (COL(i) + 1) + ' heeft daarnaast: ' + list(per.col.sort()) + '.');
+      if (per.box.length) lines.push('Blok ' + BOXNAMES[BOX(i)] + ' heeft daarnaast: ' + list(per.box.sort()) + '.');
+      const el = digitsOf(state.elim[i] & ~state.seenMask(i));
+      if (el.length) lines.push('Eerder weggestreept: ' + list(el) + '.');
+      lines.push('Het enige cijfer dat overblijft is ' + d + ', dus ' + name(i) + ' = ' + d + '.');
+      const house = [...new Set([...HOUSES[ROW(i)], ...HOUSES[9 + COL(i)], ...HOUSES[18 + BOX(i)]])];
+      out.push({
+        type: 'nakedSingle', technique: 'Enige cijfer in vakje',
+        title: 'Welk cijfer past nog in ' + name(i) + '?',
+        digit: d, place: { cell: i, digit: d }, eliminations: [], lines,
+        hl: { house, blocked: [], sources: src, excluded: [], occupied: [], target: i, digitFocus: 0 },
+        score: 30
+      });
+    }
+    return out;
+  }
+
+  // ---------- geavanceerd: alleen wegstrepen ----------
+  function mkElim(state, list_) {
+    return list_.filter(e => !state.grid[e.cell] && (state.cands(e.cell) & BIT(e.digit)));
+  }
+
+  function findLocked(state, C) {
+    for (let d = 1; d <= 9; d++) {
+      // pointing: in blok alle d in 1 rij/kolom
+      for (let b = 18; b < 27; b++) {
+        const pos = HOUSES[b].filter(i => C[i] & BIT(d));
+        if (pos.length < 2) continue;
+        for (const type of ['row', 'col']) {
+          const u = houseOf(type, pos[0]);
+          if (!pos.every(i => houseOf(type, i) === u)) continue;
+          const el = mkElim(state, HOUSES[u].filter(i => BOX(i) !== b - 18 && (C[i] & BIT(d))).map(cell => ({ cell, digit: d })));
+          if (el.length) return {
+            type: 'locked', technique: 'Wijzend paar/drietal',
+            title: 'De ' + d + ' in blok ' + BOXNAMES[b - 18] + ' zit vast in ' + houseName(u),
+            digit: d, place: null, eliminations: el,
+            lines: [
+              'In blok ' + BOXNAMES[b - 18] + ' kan de ' + d + ' alleen op ' + list(pos.map(name)) + '.',
+              'Die liggen allemaal in ' + houseName(u) + '. De ' + d + ' van ' + houseName(u) + ' moet dus in dit blok staan.',
+              'Daarom kan de ' + d + ' niet op ' + list(el.map(e => name(e.cell))) + '.'
+            ],
+            hl: { house: HOUSES[u].concat(HOUSES[b]), pattern: pos.map(cell => ({ cell, digit: d })), digitFocus: d }
+          };
+        }
+      }
+      // claiming: in rij/kolom alle d in 1 blok
+      for (let u = 0; u < 18; u++) {
+        const pos = HOUSES[u].filter(i => C[i] & BIT(d));
+        if (pos.length < 2) continue;
+        const b = BOX(pos[0]);
+        if (!pos.every(i => BOX(i) === b)) continue;
+        const el = mkElim(state, HOUSES[18 + b].filter(i => houseOf(houseType(u), i) !== u && (C[i] & BIT(d))).map(cell => ({ cell, digit: d })));
+        if (el.length) return {
+          type: 'locked', technique: 'Vergrendeld in blok',
+          title: 'De ' + d + ' van ' + houseName(u) + ' zit in blok ' + BOXNAMES[b],
+          digit: d, place: null, eliminations: el,
+          lines: [
+            'In ' + houseName(u) + ' kan de ' + d + ' alleen op ' + list(pos.map(name)) + '.',
+            'Die liggen allemaal in blok ' + BOXNAMES[b] + '. De ' + d + ' van dat blok komt dus in ' + houseName(u) + '.',
+            'Daarom kan de ' + d + ' niet op ' + list(el.map(e => name(e.cell))) + '.'
+          ],
+          hl: { house: HOUSES[u].concat(HOUSES[18 + b]), pattern: pos.map(cell => ({ cell, digit: d })), digitFocus: d }
+        };
+      }
+    }
+    return null;
+  }
+
+  function combos(arr, k, start = 0, pre = [], out = []) {
+    if (pre.length === k) { out.push(pre.slice()); return out; }
+    for (let j = start; j < arr.length; j++) { pre.push(arr[j]); combos(arr, k, j + 1, pre, out); pre.pop(); }
+    return out;
+  }
+  const WORD = { 2: 'paar', 3: 'drietal', 4: 'viertal' };
+
+  function findNakedSubset(state, C, k) {
+    for (let h = 0; h < 27; h++) {
+      const empt = HOUSES[h].filter(i => C[i] && popcount(C[i]) <= k);
+      if (empt.length < k) continue;
+      for (const set of combos(empt, k)) {
+        const m = set.reduce((a, i) => a | C[i], 0);
+        if (popcount(m) !== k) continue;
+        const ds = digitsOf(m);
+        const el = [];
+        for (const i of HOUSES[h]) if (!set.includes(i) && C[i]) for (const d of ds) if (C[i] & BIT(d)) el.push({ cell: i, digit: d });
+        if (!el.length) continue;
+        return {
+          type: 'nakedSubset', technique: 'Naakt ' + WORD[k],
+          title: 'Naakt ' + WORD[k] + ' ' + ds.join('/') + ' in ' + houseName(h),
+          digit: 0, place: null, eliminations: el,
+          lines: [
+            'In ' + houseName(h) + ' kunnen ' + list(set.map(name)) + ' alleen ' + list(ds) + ' bevatten.',
+            k + ' vakjes, ' + k + ' cijfers: die cijfers zitten dus zeker in deze vakjes.',
+            'Streep ' + list(ds) + ' weg uit de andere vakjes van ' + houseName(h) + ': ' + list([...new Set(el.map(e => name(e.cell)))]) + '.'
+          ],
+          hl: { house: HOUSES[h].slice(), pattern: set.flatMap(i => digitsOf(C[i]).map(d => ({ cell: i, digit: d }))), digitFocus: 0 }
+        };
+      }
+    }
+    return null;
+  }
+
+  function findHiddenSubset(state, C, k) {
+    for (let h = 0; h < 27; h++) {
+      const cells = HOUSES[h];
+      const ds = [];
+      for (let d = 1; d <= 9; d++) {
+        const n = cells.filter(i => C[i] & BIT(d)).length;
+        if (n >= 2 && n <= k) ds.push(d);
+      }
+      for (const dset of combos(ds, k)) {
+        const pos = cells.filter(i => dset.some(d => C[i] & BIT(d)));
+        if (pos.length !== k) continue;
+        const mask = dset.reduce((a, d) => a | BIT(d), 0);
+        const el = [];
+        for (const i of pos) for (const d of digitsOf(C[i] & ~mask)) el.push({ cell: i, digit: d });
+        if (!el.length) continue;
+        return {
+          type: 'hiddenSubset', technique: 'Verborgen ' + WORD[k],
+          title: 'Verborgen ' + WORD[k] + ' ' + dset.join('/') + ' in ' + houseName(h),
+          digit: 0, place: null, eliminations: el,
+          lines: [
+            'In ' + houseName(h) + ' kunnen ' + list(dset) + ' alleen op ' + list(pos.map(name)) + '.',
+            k + ' cijfers passen maar in ' + k + ' vakjes: die vakjes zijn dus voor deze cijfers.',
+            'Andere kandidaten in die vakjes vallen af.'
+          ],
+          hl: { house: cells.slice(), pattern: pos.flatMap(i => dset.filter(d => C[i] & BIT(d)).map(d => ({ cell: i, digit: d }))), digitFocus: 0 }
+        };
+      }
+    }
+    return null;
+  }
+
+  function findFish(state, C, k) {
+    const fname = { 2: 'X-wing', 3: 'Swordfish' }[k];
+    for (let d = 1; d <= 9; d++) {
+      for (const [base, cover] of [['row', 'col'], ['col', 'row']]) {
+        const off = base === 'row' ? 0 : 9;
+        const lines_ = [];
+        for (let u = 0; u < 9; u++) {
+          const pos = HOUSES[off + u].filter(i => C[i] & BIT(d));
+          if (pos.length >= 2 && pos.length <= k) lines_.push({ u: off + u, pos });
+        }
+        for (const set of combos(lines_, k)) {
+          const covers = new Set();
+          set.forEach(s => s.pos.forEach(i => covers.add(houseOf(cover, i))));
+          if (covers.size !== k) continue;
+          const baseU = set.map(s => s.u);
+          const el = [];
+          for (const cu of covers) for (const i of HOUSES[cu]) {
+            if (!baseU.includes(houseOf(base, i)) && (C[i] & BIT(d))) el.push({ cell: i, digit: d });
+          }
+          if (!el.length) continue;
+          const pos = set.flatMap(s => s.pos);
+          const bn = baseU.map(houseName), cn = [...covers].sort((a, b) => a - b).map(houseName);
+          return {
+            type: 'fish', technique: fname,
+            title: fname + ' op de ' + d,
+            digit: d, place: null, eliminations: el,
+            lines: [
+              'In ' + list(bn) + ' kan de ' + d + ' alleen in ' + list(cn) + '.',
+              'Elke ' + (base === 'row' ? 'rij' : 'kolom') + ' moet een ' + d + ', dus ' + list(cn) + ' krijgen hun ' + d + ' uit deze ' + k + ' ' + (base === 'row' ? 'rijen' : 'kolommen') + '.',
+              'Daarom kan de ' + d + ' niet op ' + list(el.map(e => name(e.cell))) + '.'
+            ],
+            hl: { house: [...covers].flatMap(u => HOUSES[u]).concat(baseU.flatMap(u => HOUSES[u])), pattern: pos.map(cell => ({ cell, digit: d })), digitFocus: d }
+          };
+        }
+      }
+    }
+    return null;
+  }
+
+  function findXYWing(state, C) {
+    const bi = [];
+    for (let i = 0; i < 81; i++) if (popcount(C[i]) === 2) bi.push(i);
+    for (const p of bi) {
+      const [a, b] = digitsOf(C[p]);
+      const peersBi = bi.filter(q => q !== p && PEERS[p].includes(q));
+      for (const q1 of peersBi) for (const q2 of peersBi) {
+        if (q1 >= q2) continue;
+        // q1 = a+z, q2 = b+z
+        for (const [x, y] of [[a, b], [b, a]]) {
+          if (!(C[q1] & BIT(x)) || (C[q1] & BIT(y))) continue;
+          if (!(C[q2] & BIT(y)) || (C[q2] & BIT(x))) continue;
+          const z1 = C[q1] & ~BIT(x), z2 = C[q2] & ~BIT(y);
+          if (z1 !== z2) continue;
+          const z = digitsOf(z1)[0];
+          const el = [];
+          for (let i = 0; i < 81; i++) {
+            if (i === q1 || i === q2 || i === p) continue;
+            if ((C[i] & BIT(z)) && PEERS[q1].includes(i) && PEERS[q2].includes(i)) el.push({ cell: i, digit: z });
+          }
+          if (!el.length) continue;
+          return {
+            type: 'xywing', technique: 'XY-wing',
+            title: 'XY-wing met ' + name(p) + ' als spil',
+            digit: z, place: null, eliminations: el,
+            lines: [
+              name(p) + ' is ' + x + ' of ' + y + '.',
+              'Is het ' + x + ', dan wordt ' + name(q1) + ' een ' + z + '. Is het ' + y + ', dan wordt ' + name(q2) + ' een ' + z + '.',
+              'Hoe dan ook staat er een ' + z + ' op ' + name(q1) + ' of ' + name(q2) + '.',
+              'Vakjes die beide zien kunnen geen ' + z + ' zijn: ' + list(el.map(e => name(e.cell))) + '.'
+            ],
+            hl: { house: [p, q1, q2], pattern: [p, q1, q2].flatMap(i => digitsOf(C[i]).map(d => ({ cell: i, digit: d }))), digitFocus: 0 }
+          };
+        }
+      }
+    }
+    return null;
+  }
+
+  // ---------- volgende stap kiezen ----------
+  function nextStep(state) {
+    const singles = findHiddenSingles(state).concat(findNakedSingles(state));
+    if (singles.length) {
+      singles.sort((a, b) => a.score - b.score);
+      return singles[0];
+    }
+    const C = state.allCands();
+    // lege cel zonder kandidaten: tegenstrijdig
+    for (let i = 0; i < 81; i++) if (!state.grid[i] && !C[i]) return null;
+    return findLocked(state, C) || findNakedSubset(state, C, 2) || findHiddenSubset(state, C, 2) ||
+      findNakedSubset(state, C, 3) || findHiddenSubset(state, C, 3) || findFish(state, C, 2) ||
+      findXYWing(state, C) || findFish(state, C, 3) ||
+      findNakedSubset(state, C, 4) || findHiddenSubset(state, C, 4) || null;
+  }
+
+  function apply(state, step, nr) {
+    if (step.place) state.grid[step.place.cell] = step.place.digit;
+    for (const e of step.eliminations) {
+      state.elim[e.cell] |= BIT(e.digit);
+      state.elimStep[e.cell][e.digit] = nr;
+    }
+  }
+
+  // Maakt de volledige lijst stappen. Elke stap krijgt een momentopname ervoor.
+  function explain(givens, maxSteps = 400) {
+    let state = new State(givens);
+    const steps = [];
+    while (steps.length < maxSteps) {
+      if (state.grid.every(v => v)) break;
+      const step = nextStep(state);
+      if (!step) {
+        steps.push({ type: 'stuck', technique: 'Vastgelopen', title: 'Geen eenvoudige volgende stap gevonden',
+          lines: ['De app kent (nog) geen techniek die hier verder helpt.', 'Er wordt niet gegokt en geen oplossing gebruikt.'],
+          place: null, eliminations: [], hl: {}, before: snapshot(state) });
+        break;
+      }
+      step.before = snapshot(state);
+      steps.push(step);
+      apply(state, step, steps.length);
+      step.after = snapshot(state);
+    }
+    return { steps, solved: state.grid.every(v => v), final: state.grid.slice() };
+  }
+
+  function snapshot(state) {
+    return { grid: state.grid.slice(), cands: state.allCands() };
+  }
+
+  const api = { explain, countSolutions, conflicts, digitsOf, name, State, nextStep, HOUSES, BOXNAMES };
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+  else root.SudokuSolver = api;
+})(typeof window !== 'undefined' ? window : this);
+</script>
+<script>
+/* Sudoku Uitleg: interface */
+(function () {
+  'use strict';
+  const S = window.SudokuSolver;
+  const $ = id => document.getElementById(id);
+  const KRANT = '400006000620003000000710480100050900006400100000080570070960030000000000030004000';
+  const KEY = 'sudoku-uitleg-invoer';
+
+  let givens = new Array(81).fill(0);
+  let sel = 0;
+  let mode = 'input';
+  let steps = [];
+  let k = -1;      // -1 = beginstand
+  let phase = 0;   // 0 = redenering, 1 = cijfer geplaatst
+  let badCells = [];
+
+  // ---------- rooster ----------
+  const cells = [];
+  const grid = $('grid');
+  for (let i = 0; i < 81; i++) {
+    const r = Math.floor(i / 9), c = i % 9;
+    const el = document.createElement('div');
+    el.className = 'cell' + (c % 3 === 2 && c < 8 ? ' br' : '') + (r % 3 === 2 && r < 8 ? ' bb' : '') +
+      (c === 8 ? ' c9' : '') + (r === 8 ? ' r9' : '');
+    el.addEventListener('click', () => { if (mode === 'input') { sel = i; render(); } });
+    grid.appendChild(el);
+    cells.push(el);
+  }
+
+  // ---------- invoer ----------
+  const pad = $('pad');
+  for (let d = 1; d <= 9; d++) addPad(String(d), () => setVal(d));
+  addPad('Wis', () => setVal(0));
+  function addPad(label, fn) {
+    const b = document.createElement('button');
+    b.textContent = label; b.addEventListener('click', fn); pad.appendChild(b);
+  }
+  function setVal(d) {
+    givens[sel] = d;
+    if (d && sel < 80) sel++;
+    save(); check(); render();
+  }
+  document.addEventListener('keydown', e => {
+    if (e.target.tagName === 'TEXTAREA') return;
+    if (mode === 'explain') {
+      if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); next(); }
+      if (e.key === 'ArrowLeft') prev();
+      return;
+    }
+    if (/^[1-9]$/.test(e.key)) setVal(+e.key);
+    else if (e.key === '0' || e.key === 'Backspace' || e.key === 'Delete') { givens[sel] = 0; if (e.key === 'Backspace' && sel > 0) sel--; save(); check(); render(); }
+    else if (e.key === 'ArrowRight') { sel = Math.min(80, sel + 1); render(); }
+    else if (e.key === 'ArrowLeft') { sel = Math.max(0, sel - 1); render(); }
+    else if (e.key === 'ArrowDown') { sel = Math.min(80, sel + 9); render(); }
+    else if (e.key === 'ArrowUp') { sel = Math.max(0, sel - 9); render(); }
+  });
+
+  function save() { try { localStorage.setItem(KEY, givens.join('')); } catch (e) { /* geen opslag */ } }
+  function load() {
+    try { const v = localStorage.getItem(KEY); if (v && /^[0-9]{81}$/.test(v)) givens = v.split('').map(Number); } catch (e) { /* */ }
+  }
+  function setMsg(t, cls) { const m = $('msg'); m.textContent = t; m.className = 'msg ' + (cls || ''); }
+  function check() {
+    badCells = S.conflicts(givens);
+    if (badCells.length) setMsg('Dubbel cijfer in rij, kolom of blok (rood gemarkeerd).', 'err');
+    else setMsg(givens.filter(Boolean).length + ' begincijfers ingevuld.');
+  }
+
+  $('btnExample').onclick = () => { givens = KRANT.split('').map(Number); save(); check(); render(); };
+  $('btnClear').onclick = () => { givens.fill(0); sel = 0; save(); check(); render(); };
+  $('btnLoadTxt').onclick = () => {
+    const t = $('txt').value.replace(/[^0-9.]/g, '').replace(/\./g, '0');
+    if (t.length !== 81) { setMsg('Tekst heeft ' + t.length + ' cijfers, nodig: 81.', 'err'); return; }
+    givens = t.split('').map(Number); save(); check(); render();
+  };
+
+  $('btnStart').onclick = () => {
+    check();
+    if (badCells.length) return;
+    if (givens.filter(Boolean).length < 17) { setMsg('Minstens 17 begincijfers nodig.', 'err'); return; }
+    const sol = S.countSolutions(givens);
+    if (sol.count === 0) { setMsg('Deze puzzel heeft geen oplossing. Controleer de invoer.', 'err'); return; }
+    if (sol.count > 1) { setMsg('Let op: meer dan 1 oplossing. Controleer de invoer.', 'err'); return; }
+    steps = S.explain(givens).steps;
+    k = -1; phase = 0; mode = 'explain';
+    $('inputPanel').hidden = true; $('explainPanel').hidden = false;
+    $('modeInfo').textContent = 'Druk op Volgende. Eerst de redenering, dan het cijfer.';
+    render();
+  };
+  $('btnEdit').onclick = () => {
+    mode = 'input';
+    $('inputPanel').hidden = false; $('explainPanel').hidden = true;
+    $('modeInfo').textContent = 'Vul de begincijfers in. Daarna leg ik stap voor stap uit.';
+    check(); render();
+  };
+
+  // ---------- navigatie ----------
+  const hasPhase2 = st => st.type !== 'stuck';
+  function next() {
+    if (k >= 0 && phase === 0 && hasPhase2(steps[k])) phase = 1;
+    else if (k < steps.length - 1) { k++; phase = 0; }
+    render();
+  }
+  function prev() {
+    if (k < 0) return;
+    if (phase === 1) phase = 0;
+    else { k--; phase = k >= 0 && hasPhase2(steps[k]) ? 1 : 0; }
+    render();
+  }
+  $('btnNext').onclick = next;
+  $('btnPrev').onclick = prev;
+  $('btnRestart').onclick = () => { k = -1; phase = 0; render(); };
+  $('chkCands').onchange = render;
+
+  // ---------- tekenen ----------
+  function render() { mode === 'input' ? renderInput() : renderExplain(); }
+
+  function renderInput() {
+    for (let i = 0; i < 81; i++) {
+      const el = cells[i];
+      el.className = el.className.split(' ').filter(c => ['cell', 'br', 'bb', 'c9', 'r9'].includes(c)).join(' ');
+      el.innerHTML = givens[i] ? '<span class="v">' + givens[i] + '</span>' : '';
+      if (givens[i]) el.classList.add('given');
+      if (i === sel) el.classList.add('sel');
+      if (badCells.includes(i)) el.classList.add('bad');
+    }
+  }
+
+  function renderExplain() {
+    const st = k >= 0 ? steps[k] : null;
+    const snap = st ? (phase === 1 && st.after ? st.after : st.before) : { grid: givens, cands: null };
+    const hl = st ? st.hl || {} : {};
+    const showCands = $('chkCands').checked || (st && st.eliminations.length > 0);
+    const cands = snap.cands || (showCands ? new S.State(givens).allCands() : null);
+    const pat = new Set((hl.pattern || []).map(p => p.cell + ':' + p.digit));
+    const elim = new Set(st ? st.eliminations.map(e => e.cell + ':' + e.digit) : []);
+    const has = (arr, i) => arr && arr.includes(i);
+
+    for (let i = 0; i < 81; i++) {
+      const el = cells[i];
+      el.className = el.className.split(' ').filter(c => ['cell', 'br', 'bb', 'c9', 'r9'].includes(c)).join(' ');
+      const v = snap.grid[i];
+      const isTarget = st && st.place && st.place.cell === i;
+      if (has(hl.house, i)) el.classList.add('house');
+      if (has(hl.occupied, i)) el.classList.add('occ');
+      if (has(hl.blocked, i)) el.classList.add('blocked');
+      if (has(hl.sources, i)) el.classList.add('src');
+      if (has(hl.excluded, i)) el.classList.add('ex');
+      if (isTarget) el.classList.add('tgt');
+      if (v) {
+        el.classList.add(givens[i] ? 'given' : 'found');
+        el.innerHTML = '<span class="v">' + v + '</span>';
+      } else if (isTarget) {
+        el.classList.add('q');
+        el.innerHTML = '<span class="v">?</span>';
+      } else if (showCands && cands && !has(hl.excluded, i)) {
+        const m = cands[i];
+        let h = '<div class="cands">';
+        for (let d = 1; d <= 9; d++) {
+          const key = i + ':' + d;
+          let cls = '';
+          if (!(m & (1 << d))) cls = elim.has(key) && phase === 0 ? 'el' : 'gone';
+          else if (elim.has(key)) cls = 'el';
+          else if (pat.has(key)) cls = 'pat';
+          else if (hl.digitFocus === d) cls = 'focus';
+          h += '<span class="' + cls + '">' + d + '</span>';
+        }
+        el.innerHTML = h + '</div>';
+      } else el.innerHTML = '';
+    }
+
+    // tekstkaart
+    const total = steps.length;
+    $('counter').textContent = k < 0 ? 'Begin' : 'Stap ' + (k + 1) + ' / ' + total;
+    $('btnPrev').disabled = k < 0;
+    $('btnNext').disabled = k >= total - 1 && (k < 0 || phase === 1 || !hasPhase2(steps[k]));
+    const lines = $('lines');
+    lines.innerHTML = '';
+    if (!st) {
+      $('tech').textContent = 'Beginstand';
+      $('title').textContent = 'Alleen de begincijfers';
+      addLine('Er staan ' + givens.filter(Boolean).length + ' cijfers. Elke stap zoekt de makkelijkste volgende zet.');
+      $('phaseHint').textContent = 'Druk op Volgende.';
+      return;
+    }
+    $('tech').textContent = st.technique;
+    $('title').textContent = st.title;
+    st.lines.forEach((t, j) => {
+      const last = j === st.lines.length - 1 && st.place;
+      if (last && phase === 0) return; // conclusie pas bij fase 2
+      addLine(t, last ? 'final' : '');
+    });
+    if (st.type === 'stuck') $('phaseHint').textContent = '';
+    else if (phase === 0) $('phaseHint').textContent = st.place ? 'Welk vakje blijft over? Druk op Volgende om het cijfer te plaatsen.' : 'Druk op Volgende om de kandidaten weg te strepen.';
+    else $('phaseHint').textContent = k === total - 1 ? 'Klaar! De sudoku is opgelost.' : 'Druk op Volgende voor de volgende stap.';
+  }
+  function addLine(t, cls) {
+    const li = document.createElement('li');
+    li.textContent = t; if (cls) li.className = cls;
+    $('lines').appendChild(li);
+  }
+
+  load(); check(); render();
+})();
+</script>
+</body>
+</html>
