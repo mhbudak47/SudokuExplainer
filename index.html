@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Sudoku Uitleg</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<main>
+  <header>
+    <h1>Sudoku Uitleg</h1>
+    <p id="modeInfo" class="sub">Vul de begincijfers in. Daarna leg ik stap voor stap uit.</p>
+  </header>
+
+  <div id="grid" class="grid" aria-label="Sudoku rooster"></div>
+
+  <!-- INVOER -->
+  <section id="inputPanel">
+    <div id="pad" class="pad"></div>
+    <div class="row">
+      <button id="btnExample" class="ghost">Voorbeeld (krant)</button>
+      <button id="btnClear" class="ghost">Leeg maken</button>
+    </div>
+    <details>
+      <summary>Plakken als tekst</summary>
+      <p class="small">81 tekens, rij voor rij. Leeg = 0 of punt.</p>
+      <textarea id="txt" rows="3" spellcheck="false"></textarea>
+      <button id="btnLoadTxt" class="ghost">Laden</button>
+    </details>
+    <p id="msg" class="msg"></p>
+    <button id="btnStart" class="primary big">Start uitleg</button>
+  </section>
+
+  <!-- UITLEG -->
+  <section id="explainPanel" hidden>
+    <div class="nav">
+      <button id="btnPrev">&larr; Vorige</button>
+      <span id="counter"></span>
+      <button id="btnNext" class="primary">Volgende &rarr;</button>
+    </div>
+    <div id="card" class="card">
+      <div id="tech" class="tech"></div>
+      <h2 id="title"></h2>
+      <ol id="lines"></ol>
+      <p id="phaseHint" class="hint"></p>
+    </div>
+    <div class="row">
+      <button id="btnRestart" class="ghost">Begin opnieuw</button>
+      <label class="toggle"><input type="checkbox" id="chkCands"> Kandidaten</label>
+      <button id="btnEdit" class="ghost">Invoer wijzigen</button>
+    </div>
+    <div class="legend">
+      <span><i class="lg house"></i>zoekgebied</span>
+      <span><i class="lg blocked"></i>geblokkeerd</span>
+      <span><i class="lg src">6</i>oorzaak</span>
+      <span><i class="lg ex">&times;</i>valt af</span>
+      <span><i class="lg tgt"></i>enige plek</span>
+    </div>
+  </section>
+</main>
+<script src="js/solver.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
