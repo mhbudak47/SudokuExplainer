@@ -130,8 +130,11 @@
     const st = k >= 0 ? steps[k] : null;
     const snap = st ? (phase === 1 && st.after ? st.after : st.before) : { grid: givens, cands: null };
     const hl = st ? st.hl || {} : {};
-    const showCands = $('chkCands').checked || (st && st.eliminations.length > 0);
+    // kandidaten blijven zichtbaar vanaf de eerste wegstreep-stap
+    const firstAdv = steps.findIndex(x => x.eliminations && x.eliminations.length);
+    const showCands = $('chkCands').checked || (st && firstAdv >= 0 && k >= firstAdv);
     const cands = snap.cands || (showCands ? new S.State(givens).allCands() : null);
+    const base = showCands ? new S.State(snap.grid).allCands() : null; // zonder wegstrepingen
     const pat = new Set((hl.pattern || []).map(p => p.cell + ':' + p.digit));
     const elim = new Set(st ? st.eliminations.map(e => e.cell + ':' + e.digit) : []);
     const has = (arr, i) => arr && arr.includes(i);
@@ -153,13 +156,13 @@
       } else if (isTarget) {
         el.classList.add('q');
         el.innerHTML = '<span class="v">?</span>';
-      } else if (showCands && cands && !has(hl.excluded, i)) {
+      } else if (showCands && cands) {
         const m = cands[i];
-        let h = '<div class="cands">';
+        let h = '<div class="cands' + (has(hl.excluded, i) ? ' dim' : '') + '">';
         for (let d = 1; d <= 9; d++) {
           const key = i + ':' + d;
           let cls = '';
-          if (!(m & (1 << d))) cls = elim.has(key) && phase === 0 ? 'el' : 'gone';
+          if (!(m & (1 << d))) cls = elim.has(key) ? 'el' : (base[i] & (1 << d)) ? 'old' : 'gone';
           else if (elim.has(key)) cls = 'el';
           else if (pat.has(key)) cls = 'pat';
           else if (hl.digitFocus === d) cls = 'focus';

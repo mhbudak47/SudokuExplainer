@@ -55,6 +55,8 @@ header h1 { margin: 4px 0 0; font-size: 1.4rem; }
 .cands .pat { color: var(--pat); font-weight: 800; }
 .cands .el { color: var(--new); font-weight: 800; text-decoration: line-through; }
 .cands .gone { visibility: hidden; }
+.cands .old { opacity: .35; text-decoration: line-through; }
+.cands.dim span { opacity: .3; }
 .cands .focus { color: var(--fg); font-weight: 700; }
 
 /* knoppen */
@@ -95,5 +97,8 @@ textarea { width: 100%; font: 14px monospace; background: var(--card); color: va
 .lg.blocked { background-image: repeating-linear-gradient(45deg, var(--block) 0 3px, transparent 3px 6px); }
 .lg.src { border-radius: 50%; border: 2px solid var(--src); color: var(--fg); }
 .lg.ex { color: var(--new); }
+.lg.pat { color: var(--pat); font-weight: 800; }
+.lg.el { color: var(--new); font-weight: 800; text-decoration: line-through; }
+.lg.old { color: var(--muted); opacity: .5; text-decoration: line-through; }
 .lg.tgt { background: var(--tgt); border: 2px solid var(--tgtb); }
 [hidden] { display: none !important; }

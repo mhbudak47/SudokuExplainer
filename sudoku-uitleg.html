@@ -62,6 +62,8 @@ header h1 { margin: 4px 0 0; font-size: 1.4rem; }
 .cands .pat { color: var(--pat); font-weight: 800; }
 .cands .el { color: var(--new); font-weight: 800; text-decoration: line-through; }
 .cands .gone { visibility: hidden; }
+.cands .old { opacity: .35; text-decoration: line-through; }
+.cands.dim span { opacity: .3; }
 .cands .focus { color: var(--fg); font-weight: 700; }
 
 /* knoppen */
@@ -102,6 +104,9 @@ textarea { width: 100%; font: 14px monospace; background: var(--card); color: va
 .lg.blocked { background-image: repeating-linear-gradient(45deg, var(--block) 0 3px, transparent 3px 6px); }
 .lg.src { border-radius: 50%; border: 2px solid var(--src); color: var(--fg); }
 .lg.ex { color: var(--new); }
+.lg.pat { color: var(--pat); font-weight: 800; }
+.lg.el { color: var(--new); font-weight: 800; text-decoration: line-through; }
+.lg.old { color: var(--muted); opacity: .5; text-decoration: line-through; }
 .lg.tgt { background: var(--tgt); border: 2px solid var(--tgtb); }
 [hidden] { display: none !important; }
 </style>
@@ -156,6 +161,9 @@ textarea { width: 100%; font: 14px monospace; background: var(--card); color: va
       <span><i class="lg src">6</i>oorzaak</span>
       <span><i class="lg ex">&times;</i>valt af</span>
       <span><i class="lg tgt"></i>enige plek</span>
+      <span><i class="lg pat">5</i>kandidaat in redenering</span>
+      <span><i class="lg el">5</i>valt nu weg</span>
+      <span><i class="lg old">5</i>eerder weggestreept</span>
     </div>
   </section>
 </main>
@@ -979,8 +987,11 @@ textarea { width: 100%; font: 14px monospace; background: var(--card); color: va
     const st = k >= 0 ? steps[k] : null;
     const snap = st ? (phase === 1 && st.after ? st.after : st.before) : { grid: givens, cands: null };
     const hl = st ? st.hl || {} : {};
-    const showCands = $('chkCands').checked || (st && st.eliminations.length > 0);
+    // kandidaten blijven zichtbaar vanaf de eerste wegstreep-stap
+    const firstAdv = steps.findIndex(x => x.eliminations && x.eliminations.length);
+    const showCands = $('chkCands').checked || (st && firstAdv >= 0 && k >= firstAdv);
     const cands = snap.cands || (showCands ? new S.State(givens).allCands() : null);
+    const base = showCands ? new S.State(snap.grid).allCands() : null; // zonder wegstrepingen
     const pat = new Set((hl.pattern || []).map(p => p.cell + ':' + p.digit));
     const elim = new Set(st ? st.eliminations.map(e => e.cell + ':' + e.digit) : []);
     const has = (arr, i) => arr && arr.includes(i);
@@ -1002,13 +1013,13 @@ textarea { width: 100%; font: 14px monospace; background: var(--card); color: va
       } else if (isTarget) {
         el.classList.add('q');
         el.innerHTML = '<span class="v">?</span>';
-      } else if (showCands && cands && !has(hl.excluded, i)) {
+      } else if (showCands && cands) {
         const m = cands[i];
-        let h = '<div class="cands">';
+        let h = '<div class="cands' + (has(hl.excluded, i) ? ' dim' : '') + '">';
         for (let d = 1; d <= 9; d++) {
           const key = i + ':' + d;
           let cls = '';
-          if (!(m & (1 << d))) cls = elim.has(key) && phase === 0 ? 'el' : 'gone';
+          if (!(m & (1 << d))) cls = elim.has(key) ? 'el' : (base[i] & (1 << d)) ? 'old' : 'gone';
           else if (elim.has(key)) cls = 'el';
           else if (pat.has(key)) cls = 'pat';
           else if (hl.digitFocus === d) cls = 'focus';
