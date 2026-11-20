@@ -1,6 +1,10 @@
 /* Sudoku Uitleg: logische stap-voor-stap oplosser.
-   Werkt in browser (window.SudokuSolver) en Node (module.exports). */
-(function (root) {
+   Werkt in browser (window.SudokuSolver), in een Web Worker en in Node (module.exports). */
+(function (factory) {
+  const api = factory();
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+  else { self.SudokuSolver = api; self.SudokuSolverFactory = factory; }
+})(function () {
   'use strict';
 
   // ---------- basis ----------
@@ -422,7 +426,8 @@
       findNakedSubset(state, C, 3) || findHiddenSubset(state, C, 3) || findFish(state, C, 2) ||
       findXYWing(state, C) || findFish(state, C, 3) ||
       findNakedSubset(state, C, 4) || findHiddenSubset(state, C, 4) ||
-      findChain(state, C, 8) || findChain(state, C, 16) || findContradiction(state) || findCellForcing(state) || null;
+      findChain(state, C, 8) || findChain(state, C, 16) || findContradiction(state, 0, 12) || findForcing(state, 0) || findContradiction(state, 0, 40) ||
+      findContradiction(state, 1) || findForcing(state, 1) || findContradiction(state, 2) || null;
   }
 
   // ---------- ketens (AIC): afwisselend sterke en zwakke verbanden ----------
@@ -528,112 +533,224 @@
   }
 
   // ---------- elke mogelijkheid van een vakje geeft hetzelfde gevolg ----------
-  function propagate(state, cell, d) {
+  // Volg de gevolgen van een aanname. Geeft eindstand + logboek, of null bij tegenspraak.
+  function propagate(state, cell, d, level = 0) {
     const st = state.clone();
     st.grid[cell] = d;
     const chain = [];
-    for (let k = 0; k < 81; k++) {
-      if (conflicts(st.grid).length) return null;
+    for (let k = 0; k < 120; k++) {
       const q = quickSingle(st);
       if (!q) {
-        const C = st.allCands();
-        const e = findLocked(st, C) || findNakedSubset(st, C, 2) || findHiddenSubset(st, C, 2);
+        const e = basicElim(st, st.allCands(), level);
         if (!e) break;
         for (const x of e.eliminations) st.elim[x.cell] |= BIT(x.digit);
+        chain.push({ elim: e.eliminations, why: e.technique.toLowerCase() });
         continue;
       }
       if (q.bad) return null;
       chain.push(q);
       st.grid[q.cell] = q.digit;
     }
-    return { grid: st.grid, chain };
+    return { st, chain };
   }
-  function findCellForcing(state) {
+  // Wanneer is (j, e) in deze tak uitgesloten? Index in logboek, -1 = door de aanname zelf.
+  function excludedAt(br, j, e) {
+    if (br.cell === j) return -1;
+    if (br.d === e && sees(br.cell, j)) return -1;
+    for (let k = 0; k < br.r.chain.length; k++) {
+      const q = br.r.chain[k];
+      if (q.elim) { if (q.elim.some(x => x.cell === j && x.digit === e)) return k; continue; }
+      if (q.cell === j) return q.digit === e ? null : k;
+      if (q.digit === e && sees(q.cell, j)) return k;
+    }
+    return null;
+  }
+  function findForcing(state, level) {
     const C = state.allCands();
-    let best = null;
+    const groups = [];
     for (let i = 0; i < 81; i++) {
       const n = popcount(C[i]);
-      if (n < 2 || n > 3) continue;
-      const res = digitsOf(C[i]).map(d => ({ d, r: propagate(state, i, d) }));
-      const ok = res.filter(x => x.r);
-      if (!ok.length) continue;
+      if (n >= 2 && n <= 3) groups.push({ kind: 'cell', i, opts: digitsOf(C[i]).map(d => ({ cell: i, d })) });
+    }
+    for (let h = 0; h < 27; h++) for (let d = 1; d <= 9; d++) {
+      const pos = HOUSES[h].filter(i => C[i] & BIT(d));
+      if (pos.length >= 2 && pos.length <= 3) groups.push({ kind: 'house', h, d, opts: pos.map(cell => ({ cell, d })) });
+    }
+    let best = null;
+    const cache = new Map();
+    const run = (cell, d) => {
+      const key = cell * 10 + d;
+      if (!cache.has(key)) cache.set(key, propagate(state, cell, d, level));
+      return cache.get(key);
+    };
+    for (const g of groups) {
+      const brs = g.opts.map(o => ({ cell: o.cell, d: o.d, r: run(o.cell, o.d) }));
+      const ok = brs.filter(x => x.r);
+      if (ok.length < brs.length) continue; // tak met tegenspraak: dat doet de tegenspraak-techniek
+      // gemeenschappelijke plaatsing
       for (let j = 0; j < 81; j++) {
-        if (j === i || state.grid[j]) continue;
-        const v = ok[0].r.grid[j];
-        if (!v || !ok.every(x => x.r.grid[j] === v)) continue;
-        const len = ok.reduce((a, x) => a + x.r.chain.findIndex(q => q.cell === j) + 1, 0);
-        if (!best || len < best.len) best = { i, j, v, ok, bad: res.filter(x => !x.r).map(x => x.d), len };
+        if (state.grid[j]) continue;
+        const v = ok[0].r.st.grid[j];
+        if (v && ok.every(x => x.r.st.grid[j] === v)) {
+          const idx = ok.map(x => x.cell === j ? -1 : x.r.chain.findIndex(q => q.cell === j));
+          const len = idx.reduce((a, b) => a + b + 1, 0);
+          if (!best || len < best.len) best = { g, ok, bad: brs.filter(x => !x.r), j, v, idx, len, place: true };
+        }
+        // gemeenschappelijke wegstreping
+        for (const e of digitsOf(C[j])) {
+          if (brs.some(x => x.cell === j && x.d === e)) continue;
+          const idx = ok.map(x => excludedAt(x, j, e));
+          if (idx.some(v2 => v2 === null)) continue;
+          const len = idx.reduce((a, b) => a + b + 1, 0) + 2;
+          if (!best || len < best.len) best = { g, ok, bad: brs.filter(x => !x.r), j, v: e, idx, len, place: false };
+        }
       }
     }
     if (!best) return null;
-    const { i, j, v, ok, bad } = best;
-    const lines = [name(i) + ' kan alleen ' + list(digitsOf(C[i])) + ' zijn. We bekijken elke mogelijkheid.'];
-    for (const x of ok) {
-      const k = x.r.chain.findIndex(q => q.cell === j);
-      const steps = x.r.chain.slice(0, k + 1).map(q => name(q.cell) + '=' + q.digit);
-      lines.push('Als ' + name(i) + ' = ' + x.d + ': ' + steps.join(', ') + '.');
-    }
-    if (bad.length) lines.push('Als ' + name(i) + ' = ' + list(bad) + ': tegenspraak, dus dat kan niet.');
-    lines.push('In elk geval wordt ' + name(j) + ' een ' + v + ', dus ' + name(j) + ' = ' + v + '.');
-    return {
+    const { g, ok, bad, j, v, idx, place } = best;
+    const lines = [g.kind === 'cell'
+      ? name(g.i) + ' kan alleen ' + list(digitsOf(C[g.i])) + ' zijn. We bekijken elke mogelijkheid.'
+      : 'In ' + houseName(g.h) + ' kan de ' + g.d + ' alleen op ' + list(g.opts.map(o => name(o.cell))) + '. We bekijken elke plek.'];
+    ok.forEach((x, n) => {
+      const upto = x.r.chain.slice(0, idx[n] + 1).map(q => q.elim
+        ? q.elim.map(y => name(y.cell) + ' geen ' + y.digit).join(', ')
+        : name(q.cell) + '=' + q.digit);
+      lines.push('Als ' + name(x.cell) + ' = ' + x.d + (upto.length ? ': ' + upto.join(', ') : '') + '.');
+    });
+    for (const x of bad) lines.push('Als ' + name(x.cell) + ' = ' + x.d + ': tegenspraak, kan niet.');
+    lines.push(place ? 'In elk geval wordt ' + name(j) + ' een ' + v + ', dus ' + name(j) + ' = ' + v + '.'
+      : 'In elk geval kan ' + name(j) + ' geen ' + v + ' zijn.');
+    const base = {
       type: 'forcing', technique: 'Alle mogelijkheden',
-      title: 'Wat er ook in ' + name(i) + ' komt...',
-      digit: v, place: { cell: j, digit: v }, eliminations: [], lines,
-      hl: { house: [i], sources: [i], excluded: [], occupied: [], blocked: [], target: j, digitFocus: v }
+      title: g.kind === 'cell' ? 'Wat er ook in ' + name(g.i) + ' komt...' : 'Waar de ' + g.d + ' in ' + houseName(g.h) + ' ook komt...',
+      digit: v, lines,
+      hl: { house: g.opts.map(o => o.cell), pattern: g.opts.map(o => ({ cell: o.cell, digit: o.d })), digitFocus: 0 }
     };
+    if (place) {
+      base.place = { cell: j, digit: v }; base.eliminations = [];
+      Object.assign(base.hl, { sources: [], excluded: [], occupied: [], blocked: [], target: j });
+    } else { base.place = null; base.eliminations = [{ cell: j, digit: v }]; }
+    return base;
   }
 
   // ---------- laatste redmiddel: stel dat ... dan tegenspraak ----------
   function quickSingle(st) {
+    const C = st.allCands();
     for (let i = 0; i < 81; i++) if (!st.grid[i]) {
-      const m = st.cands(i);
-      if (!m) return { bad: name(i) + ' heeft geen cijfer meer over' };
-      if (popcount(m) === 1) return { cell: i, digit: digitsOf(m)[0], why: 'enige cijfer in vakje' };
+      const m = C[i];
+      if (!m) return { bad: name(i) + ' heeft geen cijfer meer over', kind: 'empty', i };
+      if (!(m & (m - 1))) return { cell: i, digit: digitsOf(m)[0], why: 'enige cijfer in vakje', kind: 'naked' };
     }
-    for (let h = 0; h < 27; h++) for (let d = 1; d <= 9; d++) {
-      if (HOUSES[h].some(i => st.grid[i] === d)) continue;
-      const pos = HOUSES[h].filter(i => !st.grid[i] && (st.cands(i) & BIT(d)));
-      if (!pos.length) return { bad: 'de ' + d + ' kan nergens meer in ' + houseName(h) };
-      if (pos.length === 1) return { cell: pos[0], digit: d, why: 'enige plek in ' + houseName(h) };
+    for (let h = 0; h < 27; h++) {
+      const cells = HOUSES[h];
+      let placed = 0, once = 0, twice = 0;
+      for (const i of cells) {
+        if (st.grid[i]) { placed |= BIT(st.grid[i]); continue; }
+        const m = C[i];
+        twice |= once & m; once |= m;
+      }
+      const missing = ALL & ~placed & ~once;
+      if (missing) return { bad: 'de ' + digitsOf(missing)[0] + ' kan nergens meer in ' + houseName(h), kind: 'missing', h, d: digitsOf(missing)[0] };
+      const single = once & ~twice & ~placed;
+      if (single) {
+        const d = digitsOf(single)[0];
+        const i = cells.find(c => !st.grid[c] && (C[c] & BIT(d)));
+        return { cell: i, digit: d, why: 'enige plek in ' + houseName(h), kind: 'hidden', h };
+      }
     }
     return null;
   }
-  function tryAssume(state, cell, d, limit) {
+  // level 0: singles + basis; 1: + meer technieken; 2: + tegenspraak binnenin
+  function basicElim(st, C, level) {
+    let e = findLocked(st, C) || findNakedSubset(st, C, 2) || findHiddenSubset(st, C, 2);
+    if (!e && level >= 1) e = findNakedSubset(st, C, 3) || findHiddenSubset(st, C, 3) || findFish(st, C, 2) || findXYWing(st, C);
+    return e;
+  }
+  function tryAssume(state, cell, d, limit, level = 0) {
     const st = state.clone();
     st.grid[cell] = d;
     const chain = [];
     for (let k = 0; k < limit; k++) {
-      if (conflicts(st.grid).length) return { chain, bad: 'dubbel cijfer' };
       const q = quickSingle(st);
       if (!q) {
         const C = st.allCands();
-        const e = findLocked(st, C) || findNakedSubset(st, C, 2) || findHiddenSubset(st, C, 2);
-        if (!e) return null;
-        for (const x of e.eliminations) st.elim[x.cell] |= BIT(x.digit);
-        chain.push({ elim: e.eliminations, why: e.technique.toLowerCase() });
+        const e = basicElim(st, C, level);
+        if (e) {
+          for (const x of e.eliminations) st.elim[x.cell] |= BIT(x.digit);
+          chain.push({ elim: e.eliminations, why: e.technique.toLowerCase() });
+          continue;
+        }
+        if (level < 2) return null;
+        // binnenin: zoek een kandidaat die snel tot tegenspraak leidt
+        let inner = null;
+        for (let i = 0; i < 81 && !inner; i++) for (const dd of digitsOf(C[i])) {
+          const r = tryAssume(st, i, dd, 12, 0);
+          if (r) { inner = { i, dd, r }; break; }
+        }
+        if (!inner) return null;
+        st.elim[inner.i] |= BIT(inner.dd);
+        chain.push({ elim: [{ cell: inner.i, digit: inner.dd }],
+          why: 'want stel ' + name(inner.i) + ' = ' + inner.dd + ': ' +
+            inner.r.chain.filter(q2 => !q2.elim).map(q2 => name(q2.cell) + '=' + q2.digit).join(', ') + (inner.r.chain.length ? ', ' : '') + inner.r.bad });
         continue;
       }
-      if (q.bad) return { chain, bad: q.bad };
+      if (q.bad) return { chain, bad: q.bad, badq: q };
       chain.push(q);
       st.grid[q.cell] = q.digit;
     }
     return null;
   }
-  function findContradiction(state) {
+
+  // Houd alleen de stappen over die echt nodig zijn voor de tegenspraak.
+  function prune(state, cell, d, r) {
+    if (r.chain.some(q => q.elim) || !r.badq) return r.chain;
+    const C0 = state.allCands();
+    const P = [{ cell, digit: d }].concat(r.chain);
+    const pos = new Map(P.map((q, k) => [q.cell, k]));
+    const need = (i, x, upto) => { for (let p = 0; p < upto; p++) if (P[p].digit === x && sees(P[p].cell, i)) return p; return undefined; };
+    const houseDeps = (h, dd, upto, skip) => {
+      const out = [];
+      for (const c of HOUSES[h]) {
+        if (c === skip || state.grid[c] || !(C0[c] & BIT(dd))) continue;
+        const pc = pos.get(c);
+        out.push(pc !== undefined && pc < upto ? pc : need(c, dd, upto));
+      }
+      return out;
+    };
+    const cellDeps = (i, v, upto) => digitsOf(C0[i] & ~BIT(v)).map(x => need(i, x, upto));
+    const b = r.badq, n = P.length;
+    let start = b.kind === 'empty' ? cellDeps(b.i, 0, n) : houseDeps(b.h, b.d, n, -1);
+    const needed = new Set();
+    const stack = start.slice();
+    while (stack.length) {
+      const k = stack.pop();
+      if (k === undefined) return r.chain;
+      if (needed.has(k)) continue;
+      needed.add(k);
+      if (k === 0) continue;
+      const q = P[k];
+      const deps = q.kind === 'naked' ? cellDeps(q.cell, q.digit, k) : houseDeps(q.h, q.digit, k, q.cell);
+      stack.push(...deps);
+    }
+    return r.chain.filter((q, k) => needed.has(k + 1));
+  }
+  function findContradiction(state, level = 0, maxLen = 40) {
     let best = null;
     const C = state.allCands();
     const order = [];
     for (let i = 0; i < 81; i++) if (C[i]) order.push(i);
     order.sort((a, b) => popcount(C[a]) - popcount(C[b]));
-    for (const i of order) for (const d of digitsOf(C[i])) {
-      const lim = best ? best.r.chain.length : 40;
-      const r = tryAssume(state, i, d, lim);
-      if (r && (!best || r.chain.length < best.r.chain.length)) best = { i, d, r };
+    outer: for (const i of order) for (const d of digitsOf(C[i])) {
+      const lim = best ? best.r.chain.length : maxLen;
+      const r = tryAssume(state, i, d, lim, level);
+      if (r) r.short = prune(state, i, d, r);
+      if (r && (!best || r.short.length < best.r.short.length)) best = { i, d, r };
+      if (best && best.r.short.length <= 6) break outer;
     }
     if (!best) return null;
     const { i, d, r } = best;
     const lines = ['Stel ' + name(i) + ' = ' + d + '.'];
-    for (const q of r.chain) lines.push(q.elim
+    for (const q of r.short) lines.push(q.elim
       ? 'Dan vallen weg: ' + list(q.elim.map(x => name(x.cell) + ' (' + x.digit + ')')) + ' (' + q.why + ').'
       : 'Dan ' + name(q.cell) + ' = ' + q.digit + ' (' + q.why + ').');
     lines.push('Maar dan ' + r.bad + '. Tegenspraak!');
@@ -642,7 +759,7 @@
       type: 'contradiction', technique: 'Bewijs uit tegenspraak',
       title: 'Kan ' + name(i) + ' een ' + d + ' zijn?',
       digit: d, place: null, eliminations: [{ cell: i, digit: d }], lines,
-      hl: { house: [i].concat(r.chain.filter(q => !q.elim).map(q => q.cell)), pattern: [{ cell: i, digit: d }].concat(r.chain.filter(q => !q.elim).map(q => ({ cell: q.cell, digit: q.digit }))), digitFocus: 0 }
+      hl: { house: [i].concat(r.short.filter(q => !q.elim).map(q => q.cell)), pattern: [{ cell: i, digit: d }].concat(r.short.filter(q => !q.elim).map(q => ({ cell: q.cell, digit: q.digit }))), digitFocus: 0 }
     };
   }
 
@@ -655,7 +772,7 @@
   }
 
   // Maakt de volledige lijst stappen. Elke stap krijgt een momentopname ervoor.
-  function explain(givens, maxSteps = 400) {
+  function explain(givens, maxSteps = 400, onStep) {
     let state = new State(givens);
     const steps = [];
     while (steps.length < maxSteps) {
@@ -665,12 +782,14 @@
         steps.push({ type: 'stuck', technique: 'Vastgelopen', title: 'Geen eenvoudige volgende stap gevonden',
           lines: ['De app kent (nog) geen techniek die hier verder helpt.', 'Er wordt niet gegokt en geen oplossing gebruikt.'],
           place: null, eliminations: [], hl: {}, before: snapshot(state) });
+        if (onStep) onStep(steps[steps.length - 1]);
         break;
       }
       step.before = snapshot(state);
       steps.push(step);
       apply(state, step, steps.length);
       step.after = snapshot(state);
+      if (onStep) onStep(step);
     }
     return { steps, solved: state.grid.every(v => v), final: state.grid.slice() };
   }
@@ -679,7 +798,5 @@
     return { grid: state.grid.slice(), cands: state.allCands() };
   }
 
-  const api = { explain, countSolutions, conflicts, digitsOf, name, State, nextStep, HOUSES, BOXNAMES };
-  if (typeof module !== 'undefined' && module.exports) module.exports = api;
-  else root.SudokuSolver = api;
-})(typeof window !== 'undefined' ? window : this);
+  return { explain, countSolutions, conflicts, digitsOf, name, State, nextStep, HOUSES, BOXNAMES };
+});

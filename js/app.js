@@ -10,6 +10,7 @@
   let sel = 0;
   let mode = 'input';
   let steps = [];
+  let done = false, waiting = false, worker = null;
   let k = -1;      // -1 = beginstand
   let phase = 0;   // 0 = redenering, 1 = cijfer geplaatst
   let badCells = [];
@@ -81,24 +82,48 @@
     const sol = S.countSolutions(givens);
     if (sol.count === 0) { setMsg('Deze puzzel heeft geen oplossing. Controleer de invoer.', 'err'); return; }
     if (sol.count > 1) { setMsg('Let op: meer dan 1 oplossing. Controleer de invoer.', 'err'); return; }
-    steps = S.explain(givens).steps;
+    startSolving();
     k = -1; phase = 0; mode = 'explain';
     $('inputPanel').hidden = true; $('explainPanel').hidden = false;
     $('modeInfo').textContent = 'Druk op Volgende. Eerst de redenering, dan het cijfer.';
     render();
   };
   $('btnEdit').onclick = () => {
+    stopWorker();
     mode = 'input';
     $('inputPanel').hidden = false; $('explainPanel').hidden = true;
     $('modeInfo').textContent = 'Vul de begincijfers in. Daarna leg ik stap voor stap uit.';
     check(); render();
   };
 
+  // ---------- rekenen op de achtergrond (Web Worker) ----------
+  function stopWorker() { if (worker) { worker.terminate(); worker = null; } }
+  function startSolving() {
+    stopWorker();
+    steps = []; done = false; waiting = false;
+    const g = givens.slice();
+    try {
+      const src = 'const S = (' + window.SudokuSolverFactory.toString() + ')();\n' +
+        'onmessage = e => { S.explain(e.data, 400, st => postMessage({ step: st })); postMessage({ done: true }); };';
+      worker = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+      worker.onmessage = e => {
+        if (e.data.step) steps.push(e.data.step);
+        if (e.data.done) { done = true; stopWorker(); }
+        if (waiting && (k < steps.length - 1 || done)) { waiting = false; next(); } else if (mode === 'explain') render();
+      };
+      worker.onerror = () => { stopWorker(); steps = S.explain(g).steps; done = true; render(); };
+      worker.postMessage(g);
+    } catch (err) {
+      steps = S.explain(g).steps; done = true;
+    }
+  }
+
   // ---------- navigatie ----------
   const hasPhase2 = st => st.type !== 'stuck';
   function next() {
     if (k >= 0 && phase === 0 && hasPhase2(steps[k])) phase = 1;
     else if (k < steps.length - 1) { k++; phase = 0; }
+    else if (!done) waiting = true;
     render();
   }
   function prev() {
@@ -174,9 +199,10 @@
 
     // tekstkaart
     const total = steps.length;
-    $('counter').textContent = k < 0 ? 'Begin' : 'Stap ' + (k + 1) + ' / ' + total;
+    $('counter').textContent = (k < 0 ? 'Begin' : 'Stap ' + (k + 1) + (done ? ' / ' + total : '')) + (done ? '' : ' (rekent...)');
+    $('btnNext').textContent = waiting ? 'Denkt na...' : 'Volgende \u2192';
     $('btnPrev').disabled = k < 0;
-    $('btnNext').disabled = k >= total - 1 && (k < 0 || phase === 1 || !hasPhase2(steps[k]));
+    $('btnNext').disabled = waiting || (done && k >= total - 1 && (k < 0 || phase === 1 || !hasPhase2(steps[k])));
     const lines = $('lines');
     lines.innerHTML = '';
     if (!st) {

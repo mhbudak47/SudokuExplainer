@@ -15,7 +15,9 @@ Steeds de makkelijkste menselijke zet:
 1. Enige plek voor een cijfer in blok, rij of kolom (voorkeur blok, minste oorzaken).
 2. Enige cijfer dat in een vakje past.
 3. Pas als dat niet lukt: kandidaten wegstrepen (wijzend paar, naakt/verborgen paar/drietal, X-wing, XY-wing, Swordfish, ketens).
-4. Laatste redmiddel: "stel dat ... dan tegenspraak" en "elke mogelijkheid van een vakje geeft hetzelfde".
+4. Laatste redmiddel: "stel dat ... dan tegenspraak" (alleen nodige tussenstappen) en "alle mogelijkheden" (van een vakje, of van een cijfer in rij/kolom/blok, geven hetzelfde gevolg).
+
+Het rekenen gebeurt op de achtergrond (Web Worker), zodat je al kunt lezen.
 
 De oplossing wordt nooit gebruikt om een stap te rechtvaardigen. Alleen om te controleren of de invoer 1 oplossing heeft.
 
