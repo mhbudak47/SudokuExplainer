@@ -14,7 +14,8 @@ Vul de begincijfers in. De app lost op **met uitleg per stap**, niet alles tegel
 Steeds de makkelijkste menselijke zet:
 1. Enige plek voor een cijfer in blok, rij of kolom (voorkeur blok, minste oorzaken).
 2. Enige cijfer dat in een vakje past.
-3. Pas als dat niet lukt: kandidaten wegstrepen (wijzend paar, naakt/verborgen paar/drietal, X-wing, XY-wing, Swordfish).
+3. Pas als dat niet lukt: kandidaten wegstrepen (wijzend paar, naakt/verborgen paar/drietal, X-wing, XY-wing, Swordfish, ketens).
+4. Laatste redmiddel: "stel dat ... dan tegenspraak" en "elke mogelijkheid van een vakje geeft hetzelfde".
 
 De oplossing wordt nooit gebruikt om een stap te rechtvaardigen. Alleen om te controleren of de invoer 1 oplossing heeft.
 
@@ -22,6 +23,7 @@ De oplossing wordt nooit gebruikt om een stap te rechtvaardigen. Alleen om te co
 - `index.html`, `css/style.css`, `js/app.js`: interface
 - `js/solver.js`: logische oplosser (ook in Node)
 - `tests/run.js`: `node tests/run.js` (met `v` erachter: alle stappen tonen)
+- `build.py`: `python3 build.py` maakt `sudoku-uitleg.html`
 
 ## Beperking
 Zeer moeilijke puzzels kunnen vastlopen ("Vastgelopen"): er wordt niet gegokt.
