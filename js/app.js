@@ -206,6 +206,7 @@
     const lines = $('lines');
     lines.innerHTML = '';
     if (!st) {
+      showInfo(null);
       $('tech').textContent = 'Beginstand';
       $('title').textContent = 'Alleen de begincijfers';
       addLine('Er staan ' + givens.filter(Boolean).length + ' cijfers. Elke stap zoekt de makkelijkste volgende zet.');
@@ -214,6 +215,7 @@
     }
     $('tech').textContent = st.technique;
     $('title').textContent = st.title;
+    showInfo(st);
     st.lines.forEach((t, j) => {
       const last = j === st.lines.length - 1 && st.place;
       if (last && phase === 0) return; // conclusie pas bij fase 2
@@ -222,6 +224,16 @@
     if (st.type === 'stuck') $('phaseHint').textContent = '';
     else if (phase === 0) $('phaseHint').textContent = st.place ? 'Welk vakje blijft over? Druk op Volgende om het cijfer te plaatsen.' : 'Druk op Volgende om de kandidaten weg te strepen.';
     else $('phaseHint').textContent = k === total - 1 ? 'Klaar! De sudoku is opgelost.' : 'Druk op Volgende voor de volgende stap.';
+  }
+  // uitleg van de techniek: open bij eerste keer, daarna ingeklapt
+  function showInfo(st) {
+    const box = $('info');
+    if (!st || !st.info) { box.hidden = true; return; }
+    box.hidden = false;
+    $('infoSum').textContent = 'Wat is "' + st.technique + '"?';
+    $('infoTxt').textContent = st.info;
+    const first = steps.findIndex(x => x.technique === st.technique) === k;
+    if (box.dataset.step !== String(k)) { box.open = first; box.dataset.step = String(k); }
   }
   function addLine(t, cls) {
     const li = document.createElement('li');

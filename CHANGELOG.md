@@ -1,6 +1,9 @@
 # Changelog
 
 ## 2026-11-20
+- [DONE] Uitleg per techniek ("Wat is ...?") tijdens de stappen. Open bij eerste keer, daarna inklapbaar.
+- [DONE] Echte menselijke technieken: Skyscraper, 2-String Kite, Turbot Fish, Empty Rectangle, W-wing, XYZ-wing, Finned X-wing/Swordfish, Unique Rectangle 1/2/4, BUG+1, ALS-XZ, gegroepeerde ketens, Nice Loop. Proberen = laatste redmiddel, zo genoemd.
+  - Open: puzzel 20:54 heeft nog 34 stappen "proberen"/"forcing chain" (stap 5 t/m ~50). Volgende kandidaten: ALS in ketens, Sue de Coq, Death Blossom.
 - [DONE] Fix: puzzel van 20:54 screenshot liep vast na 11 stappen. Nu opgelost in 127 stappen.
   - Nieuw: "alle mogelijkheden" voor vakje en voor cijfer in rij/kolom/blok (zelfde plaatsing of wegstreping in elke tak).
   - "Stel dat" bewijzen: sterkere niveaus, en onnodige tussenstappen worden weggelaten (kortere uitleg).

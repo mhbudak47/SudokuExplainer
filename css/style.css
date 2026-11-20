@@ -102,3 +102,7 @@ textarea { width: 100%; font: 14px monospace; background: var(--card); color: va
 .lg.old { color: var(--muted); opacity: .5; text-decoration: line-through; }
 .lg.tgt { background: var(--tgt); border: 2px solid var(--tgtb); }
 [hidden] { display: none !important; }
+
+.info { margin: 4px 0 8px; background: var(--house); border-radius: 8px; padding: 6px 10px; font-size: .9rem; }
+.info summary { cursor: pointer; font-weight: 600; }
+.info p { margin: 6px 0 2px; }

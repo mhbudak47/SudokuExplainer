@@ -424,78 +424,126 @@
     for (let i = 0; i < 81; i++) if (!state.grid[i] && !C[i]) return null;
     return findLocked(state, C) || findNakedSubset(state, C, 2) || findHiddenSubset(state, C, 2) ||
       findNakedSubset(state, C, 3) || findHiddenSubset(state, C, 3) || findFish(state, C, 2) ||
-      findXYWing(state, C) || findFish(state, C, 3) ||
+      findChain(state, C, 4, { oneDigit: true }) || findXYWing(state, C) || findXYZWing(state, C) ||
+      findUR(state, C) || findBUG(state, C) || findFish(state, C, 3) ||
+      findChain(state, C, 6, { noGroups: true }) || findFinnedFish(state, C, 2) || findFinnedFish(state, C, 3) ||
       findNakedSubset(state, C, 4) || findHiddenSubset(state, C, 4) ||
-      findChain(state, C, 8) || findChain(state, C, 16) || findContradiction(state, 0, 12) || findForcing(state, 0) || findContradiction(state, 0, 40) ||
+      findChain(state, C, 8, { oneDigit: true }) || findALSXZ(state, C) ||
+      findChain(state, C, 10) || findChain(state, C, 16) || findLoop(state, C, 12) || findLoop(state, C, 20) ||
+      findContradiction(state, 0, 12) || findForcing(state, 0) || findContradiction(state, 0, 40) ||
       findContradiction(state, 1) || findForcing(state, 1) || findContradiction(state, 2) || null;
   }
 
   // ---------- ketens (AIC): afwisselend sterke en zwakke verbanden ----------
-  // node = cel*10 + cijfer
-  const NC = n => Math.floor(n / 10), ND = n => n % 10;
-  const nname = n => name(NC(n)) + '=' + ND(n);
+  // node = cel*10 + cijfer, of groep: 10000 + index (cijfer in 2-3 vakjes van blok x rij/kolom)
   const sees = (a, b) => a !== b && PEERS[a].includes(b);
-
-  function strongLinks(C, n) {
-    const c = NC(n), d = ND(n), out = [];
-    if (popcount(C[c]) === 2) {
-      const o = digitsOf(C[c] & ~BIT(d))[0];
-      out.push({ to: c * 10 + o, why: name(c) + ' kan alleen ' + d + ' of ' + o + ' zijn' });
-    }
-    for (const type of ['row', 'col', 'box']) {
-      const h = houseOf(type, c);
-      const pos = HOUSES[h].filter(i => C[i] & BIT(d));
-      if (pos.length === 2) {
-        const o = pos[0] === c ? pos[1] : pos[0];
-        if (!out.some(x => x.to === o * 10 + d))
-          out.push({ to: o * 10 + d, why: 'in ' + houseName(h) + ' kan de ' + d + ' alleen op ' + name(pos[0]) + ' of ' + name(pos[1]) });
+  function makeGraph(C) {
+    const groups = [];
+    for (let b = 0; b < 9; b++) for (const type of ['row', 'col']) for (let k = 0; k < 3; k++) {
+      const line = type === 'row' ? Math.floor(b / 3) * 3 + k : 9 + (b % 3) * 3 + k;
+      const inter = HOUSES[18 + b].filter(i => houseOf(type, i) === line);
+      for (let d = 1; d <= 9; d++) {
+        const cells = inter.filter(i => C[i] & BIT(d));
+        if (cells.length >= 2) groups.push({ cells, d, line, box: 18 + b });
       }
     }
+    const G = { C, groups };
+    G.cells = n => n >= 10000 ? groups[n - 10000].cells : [Math.floor(n / 10)];
+    G.dig = n => n >= 10000 ? groups[n - 10000].d : n % 10;
+    G.isGroup = n => n >= 10000;
+    G.label = n => G.cells(n).map(name).join('/');
+    G.findGroup = (cells, d) => {
+      const k = groups.findIndex(g => g.d === d && g.cells.length === cells.length && g.cells.every(c => cells.includes(c)));
+      return k < 0 ? null : 10000 + k;
+    };
+    return G;
+  }
+  function nodeHouses(G, n) {
+    const cs = G.cells(n), out = [];
+    for (let h = 0; h < 27; h++) if (cs.every(c => HOUSES[h].includes(c))) out.push(h);
     return out;
   }
-  function weakLinks(C, n) {
-    const c = NC(n), d = ND(n), out = [];
-    for (const o of digitsOf(C[c] & ~BIT(d))) out.push({ to: c * 10 + o, why: 'zelfde vakje' });
-    for (const p of PEERS[c]) if (C[p] & BIT(d)) {
-      const why = ROW(p) === ROW(c) ? 'rij ' + (ROW(c) + 1) : COL(p) === COL(c) ? 'kolom ' + (COL(c) + 1) : 'blok ' + BOXNAMES[BOX(c)];
-      out.push({ to: p * 10 + d, why: 'zelfde ' + why });
+  function strongLinks(G, n) {
+    const C = G.C, d = G.dig(n), cs = G.cells(n), out = [];
+    if (!G.isGroup(n) && popcount(C[cs[0]]) === 2) {
+      const c = cs[0], o = digitsOf(C[c] & ~BIT(d))[0];
+      out.push({ to: c * 10 + o, ht: 'cell', why: name(c) + ' kan alleen ' + d + ' of ' + o + ' zijn' });
+    }
+    for (const h of nodeHouses(G, n)) {
+      const pos = HOUSES[h].filter(i => C[i] & BIT(d));
+      const rest = pos.filter(i => !cs.includes(i));
+      if (!rest.length || rest.length + cs.length !== pos.length) continue;
+      let to = null;
+      if (rest.length === 1) to = rest[0] * 10 + d;
+      else to = G.findGroup(rest, d);
+      if (to === null || out.some(x => x.to === to)) continue;
+      out.push({ to, ht: houseType(h), h, why: 'in ' + houseName(h) + ' kan de ' + d + ' alleen in ' + G.label(n) + ' of ' + G.label(to) });
     }
     return out;
   }
-  function chainElims(state, C, s, e) {
-    const a = NC(s), x = ND(s), z = NC(e), y = ND(e), el = [];
-    if (x === y && a !== z) {
-      for (let i = 0; i < 81; i++) if (i !== a && i !== z && (C[i] & BIT(x)) && sees(i, a) && sees(i, z)) el.push({ cell: i, digit: x });
-    } else if (a === z && x !== y) {
-      for (const d of digitsOf(C[a] & ~BIT(x) & ~BIT(y))) el.push({ cell: a, digit: d });
-    } else if (x !== y && sees(a, z)) {
-      if (C[a] & BIT(y)) el.push({ cell: a, digit: y });
-      if (C[z] & BIT(x)) el.push({ cell: z, digit: x });
+  function weakLinks(G, n) {
+    const C = G.C, d = G.dig(n), cs = G.cells(n), out = [];
+    if (!G.isGroup(n)) for (const o of digitsOf(C[cs[0]] & ~BIT(d))) out.push({ to: cs[0] * 10 + o, ht: 'cell', why: 'zelfde vakje' });
+    const seesAll = i => !cs.includes(i) && cs.every(c => sees(c, i));
+    const why = i => { const c = cs[0]; return ROW(i) === ROW(c) ? 'rij ' + (ROW(c) + 1) : COL(i) === COL(c) ? 'kolom ' + (COL(c) + 1) : 'blok ' + BOXNAMES[BOX(c)]; };
+    for (const p of PEERS[cs[0]]) if ((C[p] & BIT(d)) && seesAll(p)) out.push({ to: p * 10 + d, ht: 'weak', why: 'zelfde ' + why(p) });
+    G.groups.forEach((g, k) => {
+      if (g.d !== d || 10000 + k === n || !g.cells.every(seesAll)) return;
+      out.push({ to: 10000 + k, ht: 'weak', why: 'zelfde ' + why(g.cells[0]) });
+    });
+    return out;
+  }
+  function chainElims(state, G, s, e) {
+    const C = G.C, x = G.dig(s), y = G.dig(e), A = G.cells(s), Z = G.cells(e), el = [];
+    if (x === y) {
+      if (A.some(c => Z.includes(c))) return [];
+      for (let i = 0; i < 81; i++) if (!A.includes(i) && !Z.includes(i) && (C[i] & BIT(x)) &&
+        A.every(c => sees(c, i)) && Z.every(c => sees(c, i))) el.push({ cell: i, digit: x });
+    } else if (!G.isGroup(s) && !G.isGroup(e)) {
+      const a = A[0], z = Z[0];
+      if (a === z) for (const d of digitsOf(C[a] & ~BIT(x) & ~BIT(y))) el.push({ cell: a, digit: d });
+      else if (sees(a, z)) {
+        if (C[a] & BIT(y)) el.push({ cell: a, digit: y });
+        if (C[z] & BIT(x)) el.push({ cell: z, digit: x });
+      }
     }
     return mkElim(state, el);
   }
-
-  function findChain(state, C, maxLen) {
+  function onPath(G, f, n) {
+    const cs = G.cells(n), d = G.dig(n);
+    for (let p = f; p; p = p.par) {
+      if (p.n === n) return true;
+      if (G.dig(p.n) === d && G.cells(p.n).some(c => cs.includes(c))) return true;
+    }
+    return false;
+  }
+  // opts: maxLen, oneDigit, noGroups
+  function findChain(state, C, maxLen, opts = {}) {
+    const G = makeGraph(C);
+    if (opts.noGroups) G.groups.length = 0;
     let best = null;
-    for (let c = 0; c < 81; c++) for (const d of digitsOf(C[c])) {
-      const s = c * 10 + d;
-      // BFS: entry = {n, strongNext, parent, why}
+    const starts = [];
+    for (let c = 0; c < 81; c++) for (const d of digitsOf(C[c])) starts.push(c * 10 + d);
+    G.groups.forEach((g, k) => starts.push(10000 + k));
+    for (const s of starts) {
       let frontier = [{ n: s, par: null, why: '', len: 1 }];
       const seen = new Set([s + ':s']);
       while (frontier.length) {
         const nxt = [];
         for (const f of frontier) {
-          const strong = f.len % 2 === 1; // na start komt sterk, dan zwak, ...
+          const strong = f.len % 2 === 1;
           if (f.len >= maxLen) continue;
-          const links = strong ? strongLinks(C, f.n) : weakLinks(C, f.n);
+          let links = strong ? strongLinks(G, f.n) : weakLinks(G, f.n);
+          if (opts.oneDigit) links = links.filter(l => G.dig(l.to) === G.dig(s));
           for (const l of links) {
             const key = l.to + ':' + (strong ? 'w' : 's');
-            if (seen.has(key) || onPath(f, l.to)) continue;
+            if (seen.has(key) || onPath(G, f, l.to)) continue;
             seen.add(key);
-            const g = { n: l.to, par: f, why: l.why, len: f.len + 1, strong };
+            const g = { n: l.to, par: f, why: l.why, ht: l.ht, len: f.len + 1, strong };
             if (strong && g.len >= 4) {
-              const el = chainElims(state, C, s, l.to);
-              if (el.length && (!best || g.len < best.g.len)) best = { g, el, s };
+              const el = chainElims(state, G, s, l.to);
+              const groupsUsed = [s, l.to].filter(G.isGroup).length;
+              if (el.length && (!best || g.len < best.g.len)) best = { g, el, s, G };
             }
             nxt.push(g);
           }
@@ -503,32 +551,305 @@
         if (best && nxt.length && nxt[0].len >= best.g.len) break;
         frontier = nxt;
       }
-      if (best && best.g.len <= 4) return buildChainStep(best);
+      if (best && best.g.len <= 4) break;
     }
     return best ? buildChainStep(best) : null;
   }
-  function onPath(f, n) { for (let p = f; p; p = p.par) if (p.n === n) return true; return false; }
 
+  // Discontinue Nice Loop: keten die terugkomt bij het begin en zichzelf tegenspreekt.
+  function findLoop(state, C, maxLen) {
+    const G = makeGraph(C);
+    let best = null;
+    for (let c = 0; c < 81; c++) for (const d of digitsOf(C[c])) {
+      const s = c * 10 + d;
+      for (const startStrong of [true, false]) {
+        let frontier = [{ n: s, par: null, len: 1 }];
+        const seen = new Set();
+        while (frontier.length) {
+          const nxt = [];
+          for (const f of frontier) {
+            if (f.len >= maxLen || (best && f.len + 1 >= best.g.len)) continue;
+            const strong = startStrong ? f.len % 2 === 1 : f.len % 2 === 0;
+            for (const l of (strong ? strongLinks(G, f.n) : weakLinks(G, f.n))) {
+              const g = { n: l.to, par: f, why: l.why, ht: l.ht, len: f.len + 1, strong };
+              if (l.to === s) {
+                // sterk-start eindigt sterk op s: s waar. zwak-start eindigt zwak op s: s onwaar.
+                if (f.len >= 3 && strong === startStrong) best = { g, s, place: startStrong, G };
+                continue;
+              }
+              const key = l.to + ':' + strong;
+              if (seen.has(key) || onPath(G, f, l.to)) continue;
+              seen.add(key);
+              nxt.push(g);
+            }
+          }
+          frontier = nxt;
+        }
+      }
+    }
+    if (!best) return null;
+    const path = [];
+    for (let p = best.g; p; p = p.par) path.unshift(p);
+    const G2 = best.G, s0 = best.s, cell = NC0(s0), d = s0 % 10;
+    const lab = n => G2.label(n), dg = n => G2.dig(n);
+    const lines = [];
+    lines.push(best.place ? 'Stel ' + name(cell) + ' is geen ' + d + '.' : 'Stel ' + name(cell) + ' = ' + d + '.');
+    for (let k = 1; k < path.length; k++) {
+      const p = path[k];
+      const t = G2.isGroup(p.n) ? (p.strong ? 'staat de ' + dg(p.n) + ' in ' + lab(p.n) : 'staat de ' + dg(p.n) + ' niet in ' + lab(p.n))
+        : (p.strong ? 'is ' + lab(p.n) + ' wel ' + dg(p.n) : 'is ' + lab(p.n) + ' geen ' + dg(p.n));
+      lines.push('Dan ' + t + ' (' + p.why + ').');
+    }
+    lines.push('Tegenspraak met de aanname. Dus ' + (best.place ? name(cell) + ' = ' + d : name(cell) + ' is geen ' + d) + '.');
+    const st = {
+      type: 'loop', technique: 'Nice Loop', title: 'Nice Loop rond ' + name(cell) + '=' + d,
+      digit: d, lines,
+      hl: { house: [...new Set(path.flatMap(p => G2.cells(p.n)))], pattern: path.flatMap(p => G2.cells(p.n).map(c2 => ({ cell: c2, digit: dg(p.n) }))), digitFocus: 0 }
+    };
+    if (best.place) { st.place = { cell, digit: d }; st.eliminations = []; Object.assign(st.hl, { sources: [], excluded: [], occupied: [], blocked: [], target: cell }); }
+    else { st.place = null; st.eliminations = [{ cell, digit: d }]; }
+    return st;
+  }
+  const NC0 = n => Math.floor(n / 10);
+
+  function classify(G, path) {
+    const links = path.slice(1);
+    const strong = links.filter(p => p.strong);
+    const one = new Set(path.map(p => G.dig(p.n))).size === 1;
+    const hasGroup = path.some(p => G.isGroup(p.n));
+    if (one && path.length === 4) {
+      const [a, b] = strong.map(p => p.ht);
+      if (hasGroup && (a === 'box' || b === 'box')) return 'Empty Rectangle';
+      if (!hasGroup && a === b && (a === 'row' || a === 'col')) return 'Skyscraper';
+      if (!hasGroup && ((a === 'row' && b === 'col') || (a === 'col' && b === 'row')) && links[1].why.startsWith('zelfde blok')) return '2-String Kite';
+      return 'Turbot Fish';
+    }
+    if (path.length === 6 && strong[0].ht === 'cell' && strong[2].ht === 'cell' && strong[1].ht !== 'cell' &&
+        G.dig(path[0].n) === G.dig(path[5].n)) return 'W-wing';
+    if (path.length === 6 && strong.every(p => p.ht === 'cell') && G.dig(path[0].n) === G.dig(path[5].n)) return 'XY-wing';
+    if (one) return 'X-keten';
+    if (strong.every(p => p.ht === 'cell')) return 'XY-keten';
+    return 'Keten (AIC)';
+  }
   function buildChainStep(best) {
+    const G = best.G;
     const path = [];
     for (let p = best.g; p; p = p.par) path.unshift(p);
     const s = path[0].n, e = path[path.length - 1].n;
-    const digits = new Set(path.map(p => ND(p.n)));
-    const allBi = path.slice(1).every(p => !p.strong || p.why.startsWith('R'));
-    const tech = digits.size === 1 ? 'X-keten' : allBi ? 'XY-keten' : 'Keten (AIC)';
-    const lines = ['Stel ' + name(NC(s)) + ' is geen ' + ND(s) + '.'];
+    const tech = classify(G, path);
+    const lab = n => G.label(n), dg = n => G.dig(n);
+    const isTrue = n => G.isGroup(n) ? 'staat de ' + dg(n) + ' in ' + lab(n) : 'is ' + lab(n) + ' wel ' + dg(n);
+    const isFalse = n => G.isGroup(n) ? 'staat de ' + dg(n) + ' niet in ' + lab(n) : 'is ' + lab(n) + ' geen ' + dg(n);
+    const lines = [];
+    lines.push('Stel: ' + (G.isGroup(s) ? 'de ' + dg(s) + ' staat niet in ' + lab(s) : lab(s) + ' is geen ' + dg(s)) + '.');
     for (let k = 1; k < path.length; k++) {
       const p = path[k];
-      if (p.strong) lines.push('Dan is ' + name(NC(p.n)) + ' wel ' + ND(p.n) + ' (' + p.why + ').');
-      else lines.push('Dan is ' + name(NC(p.n)) + ' geen ' + ND(p.n) + ' (' + p.why + ').');
+      lines.push('Dan ' + (p.strong ? isTrue(p.n) : isFalse(p.n)) + ' (' + p.why + ').');
     }
-    lines.push('Dus: ' + nname(s) + ' of ' + nname(e) + ' is waar.');
-    lines.push('In beide gevallen kunnen deze kandidaten niet: ' + list(best.el.map(x => name(x.cell) + ' (' + x.digit + ')')) + '.');
+    const end = n => (G.isGroup(n) ? 'de ' + dg(n) + ' in ' + lab(n) : lab(n) + '=' + dg(n));
+    lines.push('Dus: ' + end(s) + ' of ' + end(e) + ' is waar.');
+    lines.push('Daarom kan niet: ' + list(best.el.map(x => name(x.cell) + ' (' + x.digit + ')')) + '.');
     return {
       type: 'chain', technique: tech,
-      title: tech + ' van ' + nname(s) + ' naar ' + nname(e),
-      digit: digits.size === 1 ? ND(s) : 0, place: null, eliminations: best.el, lines,
-      hl: { house: [...new Set(path.map(p => NC(p.n)))], pattern: path.map(p => ({ cell: NC(p.n), digit: ND(p.n) })), digitFocus: 0 }
+      title: tech + ': ' + end(s) + ' of ' + end(e),
+      digit: new Set(path.map(p => dg(p.n))).size === 1 ? dg(s) : 0, place: null, eliminations: best.el, lines,
+      hl: { house: [...new Set(path.flatMap(p => G.cells(p.n)))], pattern: path.flatMap(p => G.cells(p.n).map(c => ({ cell: c, digit: dg(p.n) }))), digitFocus: 0 }
+    };
+  }
+
+  // ---------- XYZ-wing ----------
+  function findXYZWing(state, C) {
+    for (let p = 0; p < 81; p++) {
+      if (popcount(C[p]) !== 3) continue;
+      const wings = PEERS[p].filter(q => popcount(C[q]) === 2 && (C[q] & ~C[p]) === 0);
+      for (let a = 0; a < wings.length; a++) for (let b = a + 1; b < wings.length; b++) {
+        const w1 = wings[a], w2 = wings[b];
+        if ((C[w1] | C[w2]) !== C[p] || C[w1] === C[w2]) continue;
+        const z = digitsOf(C[w1] & C[w2])[0];
+        const el = [];
+        for (let i = 0; i < 81; i++) if (i !== p && i !== w1 && i !== w2 && (C[i] & BIT(z)) && sees(i, p) && sees(i, w1) && sees(i, w2)) el.push({ cell: i, digit: z });
+        if (!el.length) continue;
+        return {
+          type: 'xyzwing', technique: 'XYZ-wing', title: 'XYZ-wing met spil ' + name(p),
+          digit: z, place: null, eliminations: el,
+          lines: [
+            'Spil ' + name(p) + ' kan ' + list(digitsOf(C[p])) + ' zijn. Vleugels: ' + name(w1) + ' (' + digitsOf(C[w1]).join('/') + ') en ' + name(w2) + ' (' + digitsOf(C[w2]).join('/') + ').',
+            'Welk cijfer de spil ook krijgt: de ' + z + ' staat dan in de spil of in een van de vleugels.',
+            'Een vakje dat alle drie ziet kan dus geen ' + z + ' zijn: ' + list(el.map(e => name(e.cell))) + '.'
+          ],
+          hl: { house: [p, w1, w2], pattern: [p, w1, w2].flatMap(i => digitsOf(C[i]).map(d => ({ cell: i, digit: d }))), digitFocus: z }
+        };
+      }
+    }
+    return null;
+  }
+
+  // ---------- gevinde vis (finned X-wing / Swordfish) ----------
+  function findFinnedFish(state, C, k) {
+    const fname = { 2: 'Finned X-wing', 3: 'Finned Swordfish' }[k];
+    for (let d = 1; d <= 9; d++) for (const [base, cover] of [['row', 'col'], ['col', 'row']]) {
+      const off = base === 'row' ? 0 : 9, coff = base === 'row' ? 9 : 0;
+      const lines_ = [];
+      for (let u = 0; u < 9; u++) {
+        const pos = HOUSES[off + u].filter(i => C[i] & BIT(d));
+        if (pos.length >= 1 && pos.length <= k + 2) lines_.push({ u: off + u, pos });
+      }
+      for (const set of combos(lines_, k)) {
+        const pos = set.flatMap(s2 => s2.pos);
+        const coverAll = [...new Set(pos.map(i => houseOf(cover, i)))];
+        for (const cv of combos(coverAll, k)) {
+          const fins = pos.filter(i => !cv.includes(houseOf(cover, i)));
+          if (!fins.length) continue;
+          const fb = BOX(fins[0]);
+          if (!fins.every(i => BOX(i) === fb)) continue;
+          const baseU = set.map(s2 => s2.u);
+          const el = [];
+          for (const cu of cv) for (const i of HOUSES[cu]) {
+            if (BOX(i) === fb && !baseU.includes(houseOf(base, i)) && (C[i] & BIT(d))) el.push({ cell: i, digit: d });
+          }
+          if (!el.length) continue;
+          const bn = baseU.map(houseName), cn = cv.slice().sort((a, b) => a - b).map(houseName);
+          return {
+            type: 'fish', technique: fname, title: fname + ' op de ' + d,
+            digit: d, place: null, eliminations: el,
+            lines: [
+              'In ' + list(bn) + ' kan de ' + d + ' bijna alleen in ' + list(cn) + '. Uitzondering (vin): ' + list(fins.map(name)) + '.',
+              'Zonder vin is het een ' + (k === 2 ? 'X-wing' : 'Swordfish') + ': dan krijgen ' + list(cn) + ' hun ' + d + ' uit deze ' + (base === 'row' ? 'rijen' : 'kolommen') + '.',
+              'Met vin staat de ' + d + ' in de vin. Hoe dan ook: vakjes in ' + list(cn) + ' die ook in het blok van de vin liggen kunnen geen ' + d + ' zijn.',
+              'Dus weg: ' + list(el.map(e => name(e.cell))) + '.'
+            ],
+            hl: { house: cv.flatMap(u => HOUSES[u]).concat(baseU.flatMap(u => HOUSES[u])), pattern: pos.map(cell => ({ cell, digit: d })), digitFocus: d }
+          };
+        }
+      }
+    }
+    return null;
+  }
+
+  // ---------- uniciteit: Unique Rectangle en BUG+1 ----------
+  function findUR(state, C) {
+    const bi = []; for (let i = 0; i < 81; i++) if (popcount(C[i]) === 2) bi.push(i);
+    for (let r1 = 0; r1 < 9; r1++) for (let r2 = r1 + 1; r2 < 9; r2++) for (let c1 = 0; c1 < 9; c1++) for (let c2 = c1 + 1; c2 < 9; c2++) {
+      const cells = [r1 * 9 + c1, r1 * 9 + c2, r2 * 9 + c1, r2 * 9 + c2];
+      if (new Set(cells.map(BOX)).size !== 2) continue;
+      if (cells.some(i => state.grid[i])) continue;
+      const pair = cells.map(i => C[i]).filter(m => popcount(m) === 2);
+      if (!pair.length) continue;
+      for (const ab of new Set(pair)) {
+        if (!cells.every(i => (C[i] & ab) === ab)) continue;
+        const floor = cells.filter(i => C[i] === ab), roof = cells.filter(i => C[i] !== ab);
+        const [a, b] = digitsOf(ab);
+        const intro = 'Vakjes ' + list(cells.map(name)) + ' vormen een rechthoek in 2 blokken met ' + a + '/' + b + '. Als ze alle vier alleen ' + a + ' of ' + b + ' zouden zijn, had de puzzel 2 oplossingen (die cijfers kun je omwisselen). Een goede puzzel heeft er maar 1.';
+        const mk = (tech, el, lines2) => ({
+          type: 'ur', technique: tech, title: tech + ' ' + a + '/' + b, digit: 0, place: null, eliminations: el,
+          lines: [intro].concat(lines2),
+          hl: { house: cells, pattern: cells.flatMap(i => [a, b].map(d => ({ cell: i, digit: d }))), digitFocus: 0 }
+        });
+        if (floor.length === 3) {
+          const t = roof[0];
+          const el = mkElim(state, [a, b].map(d => ({ cell: t, digit: d })));
+          if (el.length) return mk('Unique Rectangle type 1', el, [name(t) + ' is het enige vakje met extra cijfers. Het mag dus geen ' + a + ' of ' + b + ' zijn, anders ontstaat de dubbele oplossing.']);
+        }
+        if (floor.length === 2 && roof.length === 2) {
+          const [p, q] = roof;
+          const sameLine = ROW(p) === ROW(q) || COL(p) === COL(q);
+          if (!sameLine) continue;
+          // type 2: beide daken precies 1 en hetzelfde extra cijfer
+          if (C[p] === C[q] && popcount(C[p]) === 3) {
+            const x = digitsOf(C[p] & ~ab)[0];
+            const el = [];
+            for (let i = 0; i < 81; i++) if (i !== p && i !== q && (C[i] & BIT(x)) && sees(i, p) && sees(i, q)) el.push({ cell: i, digit: x });
+            if (mkElim(state, el).length) return mk('Unique Rectangle type 2', mkElim(state, el), [name(p) + ' en ' + name(q) + ' hebben allebei de extra ' + x + '. Een van beide moet dus ' + x + ' zijn.', 'Vakjes die beide zien kunnen geen ' + x + ' zijn.']);
+          }
+          // type 4: in de lijn van het dak kan a alleen in het dak -> b valt weg uit dak
+          const line = ROW(p) === ROW(q) ? ROW(p) : 9 + COL(p);
+          const hs = [line]; if (BOX(p) === BOX(q)) hs.push(18 + BOX(p));
+          for (const h of hs) for (const [x, y] of [[a, b], [b, a]]) {
+            const pos = HOUSES[h].filter(i => C[i] & BIT(x));
+            if (pos.length === 2 && pos.includes(p) && pos.includes(q)) {
+              const el = mkElim(state, [{ cell: p, digit: y }, { cell: q, digit: y }]);
+              if (el.length) return mk('Unique Rectangle type 4', el, ['In ' + houseName(h) + ' kan de ' + x + ' alleen op ' + name(p) + ' of ' + name(q) + '. Een van beide is dus ' + x + '.', 'Als het andere vakje dan ' + y + ' werd, ontstaat de dubbele oplossing. Dus ' + y + ' valt weg uit ' + name(p) + ' en ' + name(q) + '.']);
+            }
+          }
+        }
+      }
+    }
+    return null;
+  }
+  function findBUG(state, C) {
+    let tri = -1;
+    for (let i = 0; i < 81; i++) {
+      if (state.grid[i]) continue;
+      const n = popcount(C[i]);
+      if (n === 2) continue;
+      if (n === 3 && tri < 0) { tri = i; continue; }
+      return null;
+    }
+    if (tri < 0) return null;
+    for (const d of digitsOf(C[tri])) {
+      const h = HOUSES[ROW(tri)];
+      if (h.filter(i => C[i] & BIT(d)).length === 3) {
+        return {
+          type: 'bug', technique: 'BUG+1', title: 'BUG+1: ' + name(tri) + ' = ' + d,
+          digit: d, place: { cell: tri, digit: d }, eliminations: [],
+          lines: ['Alle lege vakjes hebben precies 2 kandidaten, behalve ' + name(tri) + ' (' + list(digitsOf(C[tri])) + ').',
+            'Zou ' + name(tri) + ' geen ' + d + ' zijn, dan heeft elk vakje 2 kandidaten en elk cijfer 2 plekken per rij/kolom/blok: dan zijn er 2 oplossingen.',
+            'De ' + d + ' komt in rij ' + (ROW(tri) + 1) + ' 3 keer voor; dat is het extra cijfer. Dus ' + name(tri) + ' = ' + d + '.'],
+          hl: { house: HOUSES[ROW(tri)].slice(), sources: [], excluded: [], occupied: [], blocked: [], target: tri, digitFocus: d }
+        };
+      }
+    }
+    return null;
+  }
+
+  // ---------- ALS-XZ ----------
+  function findALSXZ(state, C, maxSize = 3) {
+    const alss = [], seenKey = new Set();
+    for (let h = 0; h < 27; h++) {
+      const empt = HOUSES[h].filter(i => C[i]);
+      for (let n = 1; n <= maxSize; n++) for (const set of combos(empt, n)) {
+        const m = set.reduce((a, i) => a | C[i], 0);
+        if (popcount(m) !== n + 1) continue;
+        const key = set.slice().sort((a, b) => a - b).join(',');
+        if (seenKey.has(key)) continue;
+        seenKey.add(key);
+        alss.push({ cells: set, m, h });
+      }
+    }
+    const xcells = (A, x) => A.cells.filter(i => C[i] & BIT(x));
+    let best = null;
+    for (let a = 0; a < alss.length; a++) for (let b = a + 1; b < alss.length; b++) {
+      const A = alss[a], B = alss[b];
+      if (A.cells.some(i => B.cells.includes(i))) continue;
+      const common = A.m & B.m;
+      if (popcount(common) < 2) continue;
+      for (const x of digitsOf(common)) {
+        const ax = xcells(A, x), bx = xcells(B, x);
+        if (!ax.every(i => bx.every(j => sees(i, j)))) continue;
+        for (const z of digitsOf(common & ~BIT(x))) {
+          const zc = xcells(A, z).concat(xcells(B, z));
+          const el = [];
+          for (let i = 0; i < 81; i++) if (!zc.includes(i) && (C[i] & BIT(z)) && zc.every(c => sees(c, i))) el.push({ cell: i, digit: z });
+          const e2 = mkElim(state, el);
+          if (!e2.length) continue;
+          const size = A.cells.length + B.cells.length;
+          if (best && best.size <= size) continue;
+          best = { A, B, x, z, el: e2, size };
+        }
+      }
+    }
+    if (!best) return null;
+    const { A, B, x, z, el } = best;
+    const desc = S2 => list(S2.cells.map(name)) + ' (' + digitsOf(S2.m).join('/') + ')';
+    return {
+      type: 'als', technique: 'ALS-XZ', title: 'ALS-XZ met x=' + x + ', z=' + z,
+      digit: z, place: null, eliminations: el,
+      lines: [
+        'ALS A: ' + desc(A) + '. ALS B: ' + desc(B) + '.',
+        'De ' + x + ' kan niet in A én B tegelijk (alle ' + x + '-vakjes zien elkaar). Dus in A of in B ontbreekt de ' + x + ', en daar liggen de cijfers vast.',
+        'Daardoor staat de ' + z + ' zeker in A of in B. Vakjes die alle ' + z + '-vakjes van A en B zien kunnen geen ' + z + ' zijn: ' + list(el.map(e => name(e.cell))) + '.'
+      ],
+      hl: { house: A.cells.concat(B.cells), pattern: A.cells.concat(B.cells).flatMap(i => digitsOf(C[i]).filter(d => d === x || d === z).map(d => ({ cell: i, digit: d }))), digitFocus: 0 }
     };
   }
 
@@ -621,7 +942,7 @@
     lines.push(place ? 'In elk geval wordt ' + name(j) + ' een ' + v + ', dus ' + name(j) + ' = ' + v + '.'
       : 'In elk geval kan ' + name(j) + ' geen ' + v + ' zijn.');
     const base = {
-      type: 'forcing', technique: 'Alle mogelijkheden',
+      type: 'forcing', technique: 'Forcing chain (alle mogelijkheden)',
       title: g.kind === 'cell' ? 'Wat er ook in ' + name(g.i) + ' komt...' : 'Waar de ' + g.d + ' in ' + houseName(g.h) + ' ook komt...',
       digit: v, lines,
       hl: { house: g.opts.map(o => o.cell), pattern: g.opts.map(o => ({ cell: o.cell, digit: o.d })), digitFocus: 0 }
@@ -756,7 +1077,7 @@
     lines.push('Maar dan ' + r.bad + '. Tegenspraak!');
     lines.push('Dus ' + name(i) + ' is geen ' + d + '.');
     return {
-      type: 'contradiction', technique: 'Bewijs uit tegenspraak',
+      type: 'contradiction', technique: 'Proberen (laatste redmiddel)',
       title: 'Kan ' + name(i) + ' een ' + d + ' zijn?',
       digit: d, place: null, eliminations: [{ cell: i, digit: d }], lines,
       hl: { house: [i].concat(r.short.filter(q => !q.elim).map(q => q.cell)), pattern: [{ cell: i, digit: d }].concat(r.short.filter(q => !q.elim).map(q => ({ cell: q.cell, digit: q.digit }))), digitFocus: 0 }
@@ -769,6 +1090,48 @@
       state.elim[e.cell] |= BIT(e.digit);
       state.elimStep[e.cell][e.digit] = nr;
     }
+  }
+
+  // ---------- uitleg per techniek (voor wie de techniek nog niet kent) ----------
+  const TECH_INFO = {
+    'Enige plek in blok': 'Elk blok moet elk cijfer 1 keer hebben. Kijk waar het cijfer al staat in de rijen en kolommen eromheen: die rijen en kolommen vallen af. Blijft er in het blok maar 1 vakje over, dan moet het cijfer daar.',
+    'Enige plek in rij': 'Elke rij moet elk cijfer 1 keer hebben. Vakjes waar het cijfer niet kan (door dezelfde kolom of hetzelfde blok) vallen af. Blijft er 1 vakje over, dan moet het daar.',
+    'Enige plek in kolom': 'Elke kolom moet elk cijfer 1 keer hebben. Vakjes waar het cijfer niet kan (door dezelfde rij of hetzelfde blok) vallen af. Blijft er 1 vakje over, dan moet het daar.',
+    'Enige cijfer in vakje': 'Kijk welke cijfers al in de rij, kolom en het blok van dit vakje staan. Die kunnen hier niet. Blijft er maar 1 cijfer over, dan is dat het.',
+    'Wijzend paar/drietal': 'Kan een cijfer in een blok alleen in 1 rij (of kolom), dan staat het daar zeker in dat blok. Dan kan het nergens anders in die rij (of kolom).',
+    'Vergrendeld in blok': 'Kan een cijfer in een rij (of kolom) alleen binnen 1 blok, dan staat het daar. Dan kan het nergens anders in dat blok.',
+    'Naakt paar': 'Twee vakjes in dezelfde rij/kolom/blok hebben alleen dezelfde 2 cijfers. Die 2 cijfers zitten dus in die 2 vakjes. Uit de andere vakjes van die rij/kolom/blok vallen ze weg.',
+    'Naakt drietal': 'Drie vakjes in dezelfde rij/kolom/blok hebben samen maar 3 cijfers. Die 3 cijfers zitten dus in die vakjes en vallen elders in die rij/kolom/blok weg.',
+    'Naakt viertal': 'Vier vakjes in dezelfde rij/kolom/blok hebben samen maar 4 cijfers. Die cijfers vallen elders in die rij/kolom/blok weg.',
+    'Verborgen paar': 'Twee cijfers kunnen in een rij/kolom/blok maar in dezelfde 2 vakjes. Die vakjes zijn dus voor die 2 cijfers; andere kandidaten in die vakjes vallen weg.',
+    'Verborgen drietal': 'Drie cijfers kunnen in een rij/kolom/blok maar in dezelfde 3 vakjes. Andere kandidaten in die vakjes vallen weg.',
+    'Verborgen viertal': 'Vier cijfers kunnen in een rij/kolom/blok maar in dezelfde 4 vakjes. Andere kandidaten in die vakjes vallen weg.',
+    'X-wing': 'In 2 rijen kan een cijfer maar in dezelfde 2 kolommen (een rechthoek). Dan krijgen die 2 kolommen hun cijfer uit deze 2 rijen. Elders in die kolommen valt het cijfer weg. (Werkt ook met rijen en kolommen omgedraaid.)',
+    'Swordfish': 'Zoals een X-wing, maar met 3 rijen en 3 kolommen. In 3 rijen kan het cijfer alleen in dezelfde 3 kolommen; elders in die kolommen valt het weg.',
+    'Finned X-wing': 'Een X-wing met een uitzondering (de vin): een extra plek in een blok. Of de X-wing klopt, of het cijfer staat in de vin. Vakjes die in beide gevallen geen cijfer kunnen krijgen vallen weg.',
+    'Finned Swordfish': 'Een Swordfish met een vin (extra plek in een blok). Vakjes die zowel door de Swordfish als door de vin worden uitgesloten vallen weg.',
+    'Skyscraper': 'Twee evenwijdige rijen (of kolommen) waarin het cijfer maar op 2 plekken kan. Aan één kant liggen ze in dezelfde kolom. Van de twee andere uiteinden ("toppen") is er zeker één het cijfer.',
+    '2-String Kite': 'Een rij en een kolom waarin het cijfer maar op 2 plekken kan, verbonden via één blok. Van de twee losse uiteinden is er zeker één het cijfer.',
+    'Empty Rectangle': 'In een blok kan het cijfer alleen in één rij en één kolom (een kruis). Samen met een rij of kolom waar het cijfer maar op 2 plekken kan, volgt een wegstreping.',
+    'Turbot Fish': 'Twee plekken-paren voor hetzelfde cijfer (elk: "maar 2 plekken" in een rij, kolom of blok), die elkaar raken. Van de twee losse uiteinden is er zeker één het cijfer.',
+    'W-wing': 'Twee vakjes met hetzelfde paar cijfers (bijv. 4/7), die elkaar niet zien. Zijn ze verbonden door een rij/kolom/blok waar een van die cijfers maar op 2 plekken kan, dan is het andere cijfer zeker in een van beide.',
+    'XY-wing': 'Drie vakjes met elk 2 cijfers: een spil (xy) en twee vleugels (xz en yz) die de spil zien. Welk cijfer de spil ook krijgt, een vleugel wordt z. Vakjes die beide vleugels zien kunnen geen z zijn.',
+    'XYZ-wing': 'Zoals een XY-wing, maar de spil heeft 3 cijfers (xyz). De z staat dan zeker in de spil of een vleugel. Vakjes die alle drie zien kunnen geen z zijn.',
+    'Unique Rectangle type 1': 'Een goede sudoku heeft maar 1 oplossing. Vier vakjes in een rechthoek (2 blokken) met hetzelfde paar cijfers zouden 2 oplossingen geven. Dat mag niet, dus dat patroon moet doorbroken worden.',
+    'Unique Rectangle type 2': 'Een goede sudoku heeft maar 1 oplossing. Een rechthoek van 4 vakjes met hetzelfde paar zou 2 oplossingen geven. Het extra cijfer in het "dak" moet het patroon doorbreken.',
+    'Unique Rectangle type 4': 'Een goede sudoku heeft maar 1 oplossing. Een rechthoek van 4 vakjes met hetzelfde paar zou 2 oplossingen geven. Daarom mag een van de paar-cijfers niet in het "dak".',
+    'BUG+1': 'BUG = elk leeg vakje 2 kandidaten. Dat geeft altijd 2 oplossingen. Is er maar 1 vakje met 3 kandidaten, dan moet het extra cijfer daar staan.',
+    'ALS-XZ': 'Een ALS is een groep van N vakjes in één rij/kolom/blok met samen N+1 cijfers. Ontbreekt één cijfer, dan liggen de rest vast. Twee ALS-en die een cijfer x "delen" (niet allebei) dwingen een ander gedeeld cijfer z in een van beide.',
+    'X-keten': 'Een keten voor één cijfer. Sterk verband: "maar 2 plekken, dus een van beide". Zwak verband: "zien elkaar, dus niet allebei". Afwisselend volgen geeft: een van de uiteinden is zeker waar.',
+    'XY-keten': 'Een keten van vakjes met elk 2 cijfers. Is het ene cijfer het niet, dan is het het andere. Zo ga je van vakje naar vakje; een van de uiteinden is zeker waar.',
+    'Keten (AIC)': 'Een keten die afwisselt: sterk verband (een van beide is waar) en zwak verband (niet allebei waar). Begin met "stel dit is niet waar" en volg de keten. Het eind is dan waar. Dus een van beide uiteinden is zeker waar.',
+    'Nice Loop': 'Een keten die terugkomt bij het begin. Komt hij terug met het tegenovergestelde van de aanname, dan was de aanname fout.',
+    'Forcing chain (alle mogelijkheden)': 'Een vakje (of een cijfer in een rij/kolom/blok) heeft maar een paar mogelijkheden. Volg elke mogelijkheid. Gebeurt in elk geval hetzelfde, dan is dat zeker. Dit is een techniek voor zeer moeilijke puzzels.',
+    'Proberen (laatste redmiddel)': 'Geen patroon gevonden. Stel een cijfer in en volg de gevolgen. Loopt het vast (tegenspraak), dan was het fout. Dit is eigenlijk proberen; experts gebruiken het alleen als niets anders werkt.',
+    'Vastgelopen': ''
+  };
+  function infoFor(t) {
+    return TECH_INFO[t] !== undefined ? TECH_INFO[t] : '';
   }
 
   // Maakt de volledige lijst stappen. Elke stap krijgt een momentopname ervoor.
@@ -786,6 +1149,7 @@
         break;
       }
       step.before = snapshot(state);
+      if (step.info === undefined) step.info = infoFor(step.technique);
       steps.push(step);
       apply(state, step, steps.length);
       step.after = snapshot(state);
